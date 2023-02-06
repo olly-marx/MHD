@@ -16,6 +16,7 @@
 
 // Headers
 #include "fvSim.H"
+#include "fvCell.H"
 
 // Constructor, will take in settings file and test number to construct full sim
 // with initial conditions and configs for certain tests
@@ -41,7 +42,8 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 			&& test.lookupValue("x1", x1)
 			&& test.lookupValue("t0", t0)
 			&& test.lookupValue("t1", t1)
-			&& test.lookupValue("CFL", CFL)))
+			&& test.lookupValue("CFL", CFL)
+			&& test.lookupValue("gamma", gamma)))
 			std::cout << "Settings for test #" << testNum+1 << " read in."
 				<< std::endl;
 		const libconfig::Setting& range = tests[testNum]["inits"];
@@ -59,6 +61,8 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 			+ m_solver + "_test" + std::to_string(testNum) + ".dat";
 		const char* outputFileName = s.c_str();
 		outputFile.open(outputFileName);
+
+		gamma = 1.4;
 
 		// Initial conditions based on test case
 		init(range);
@@ -83,17 +87,19 @@ void fvSim::init(const libconfig::Setting& ranges){
 
 	for(int i=0;i<count;i++){
 		const libconfig::Setting& range = ranges[i];
-		double xi, xf, Qin;
+		double xi, xf, rho, u, p;
 
 		if(!(range.lookupValue("xi", xi)
 			&& range.lookupValue("xf", xf)
-			&& range.lookupValue("Q", Qin)))
+			&& range.lookupValue("rho", rho)
+			&& range.lookupValue("u", u)
+			&& range.lookupValue("p", p)))
 			continue;
 
 		for(std::size_t j=0;j<Q.size();j++){
 			double x = x0 + (j-1) * dx;
-			if(x < xf && x >= xi)
-				Q[j] = Qin;
+			if(x <= xf && x >= xi)
+				Q[j] = fvCell({rho, u, p}).toCons(gamma);
 		}
 	}
 }
@@ -101,23 +107,37 @@ void fvSim::init(const libconfig::Setting& ranges){
 // Utility to output to a ofstream when needed
 void fvSim::output(){
 	for(std::size_t i=1;i<nCells+1;i++){
-		outputFile << (x0 + (i-1)*dx) << " " << Q[i] << std::endl;
+		fvCell Wi = Q[i].toPrim(gamma);
+		outputFile << (x0 + (i-1)*dx) << " " 
+			   << Wi[0] << " " 
+			   << Wi[1] << " " 
+			   << Wi[2] << std::endl;
 	}
 }
 
 // Compute the stable time step based on the grid size and max velocity
 void fvSim::computeTimeStep(){
-	double max = Q[1];
-	for(std::size_t i=1;i<nCells+1;i++){
-		if(fabs(Q[i]) >= max) max = fabs(Q[i]);
+	fvCell Wi = Q[1].toPrim(gamma);
+	double cs  = sqrt(gamma * Wi[2] / Wi[0]);
+	double max = fabs(Wi[1]) + cs;
+	for(std::size_t i=2;i<nCells+1;i++){
+		Wi = Q[i].toPrim(gamma);
+		cs  = sqrt(gamma * Wi[2] / Wi[0]);
+		double s = fabs(Wi[1]) + cs;
+		if(s >= max) max = s;
 	}
 	dt = CFL * dx / max;
 }
 
 // The flux function for the PDE in conservation form. In this case it is the
 // Burgers' Flux ---- To be replaced by Euler when ready
-double fvSim::F(double Qi){
-	return 0.5 * Qi * Qi;
+const fvCell fvSim::F(const fvCell& Qi){
+	const fvCell Wi = Qi.toPrim(gamma);
+	fvCell result;
+	result[0] = Qi[1];
+	result[1] = Qi[1] * Wi[1] + Wi[2];
+	result[2] = (Qi[2] + Wi[2]) * Wi[1];
+	return result;
 }
 
 // compute a full time step update with flux values at cell boundaries
@@ -131,34 +151,67 @@ void fvSim::fullTimeStepUpdate(){
 }
 
 // Compute a half time step update of the data in Q_i_n giving Q_i+1/2_n+1/2
-double fvSim::halfTimeStepUpdate(double QL, double QR){
-	return 0.5 * (QR + QL) - 0.5 * (dt / dx) * (F(QR) - F(QR));
+const fvCell fvSim::halfTimeStepUpdate(const fvCell& QL, const fvCell& QR){
+	return 0.5 * (QR + QL) - 0.5 * (dt / dx) * (F(QR) - F(QL));
 }
 
 // Lax-Friedrichs Flux calculation, takes left amd right states at cell boundary
 // gives the flux at a cell boundary f_i+1/2_n
-double fvSim::LF_Flux(double QL, double QR){
-	return 0.5 * (dx / dt) * (QL - QR) + 0.5 * (F(QR) - F(QL));
+const fvCell fvSim::LF_Flux(const fvCell& QL, const fvCell& QR){
+	return 0.5 * (dx / dt) * (QL - QR) + 0.5 * (F(QR) + F(QL));
 }
 
 // Richtmyer Flux calculation, takes left and right cell boundary values of
 // half-time step updated data and simply calculates the flux function
-double fvSim::Richt_Flux(double Q_half){
+const fvCell fvSim::Richt_Flux(const fvCell& Q_half){
 	return F(Q_half);
 }
 
 // FORCE Flux is the average of a LF and Richt Flux. So, we find those at
 // Q_i+1/2_n and then calculate tye flux.
-double fvSim::FORCE_Flux(double QL, double QR){
-	double LF = LF_Flux(QL, QR);
-	double Q_half = halfTimeStepUpdate(QL, QR);
-	double Richt = Richt_Flux(Q_half);
+const fvCell fvSim::FORCE_Flux(const fvCell& QL, const fvCell& QR){
+	const fvCell LF = LF_Flux(QL, QR);
+	const fvCell Q_half = halfTimeStepUpdate(QL, QR);
+	const fvCell Richt = Richt_Flux(Q_half);
 	return 0.5 * (LF + Richt);
+}
+
+std::array<fvCell,2> fvSim::DataReconstruction(const fvCell& QL, const fvCell& Qi, const fvCell& QR){
+	fvCell dL = Qi - QL; 
+	double dL_E = fabs(dL[2]) <= 1.0e-8 ? 1.0e-8 : dL[2];
+	fvCell dR = QR - Qi; 
+	double dR_E = fabs(dR[2]) <= 1.0e-8 ? 1.0e-8 : dR[2];
+
+	double r = dL_E / dR_E;
+
+	double xi = superbee(r);
+
+	fvCell di = 0.5 * (dL + dR);
+
+	std::array<fvCell,2> result;
+	result[0] = Qi - 0.5 * xi * di;
+	result[1] = Qi + 0.5 * xi * di;
+	
+	return result;
+}
+
+double fvSim::superbee(const double& r){
+	if(r<=0)
+		return 0.0;
+	else if(r>0 && r<=0.5)
+		return 2 * r;
+	else if(r>0.5 && r<=1)
+		return 1.0;
+	else{
+		double xiR = 2.0 / (1+r);
+		return std::min(r, std::min(2.0, xiR));
+	}
 }
 
 // Calculate flux is used to parse any chosen flux function in based on user
 // choice or testing, to reduce repetition of code.
-double fvSim::calculateFlux(double QL, double QR, std::function<double(double,double)> func){
+const fvCell fvSim::calculateFlux(const fvCell& QL, const fvCell& QR,
+		std::function<const fvCell(const fvCell&,const fvCell&)> func){
 	return func(QL, QR);
 }
 
@@ -166,7 +219,7 @@ void fvSim::run(){
 
 	// Create a function pointer based on chosen flux function
 	// https://stackoverflow.com/questions/7582546/using-generic-stdfunction-objects-with-member-functions-in-one-class
-	std::function<double(double,double)> f; 
+	std::function<const fvCell(const fvCell&,const fvCell&)> f; 
 	if(m_solver == "LF")
 		f = std::bind(&fvSim::LF_Flux, this, std::placeholders::_1, std::placeholders::_2);
 	else if(m_solver == "FORCE")
@@ -182,11 +235,32 @@ void fvSim::run(){
 		// Transmissive
 		Q[0] = Q[1];
 		Q[nCells+1] = Q[nCells];
-		
-		for(std::size_t i=0;i<nCells+1;i++)
-			f_iplushalf_n[i] = calculateFlux(Q[i], Q[i+1], f );
+
+		std::array<fvCell,2> Qi;
+		Qi[0] = Q[0];
+		Qi[1] = Q[1];
+		std::array<fvCell,2> Qiplus1;
+				
+		for(std::size_t i=1;i<nCells+2;i++){
+			// Reconstruct data at cell i+1, and then set data at i
+			// equal to data at i+1 for next iteration
+			Qiplus1 = DataReconstruction(Q[i-1], Q[i], Q[i+1]);
+
+			// We set the right value of the cell interface problem
+			// equal to the left reconstrution of the right hand
+			// cell
+			// The left value of the interface problem is the right
+			// reconstruction of the left cell
+			fvCell QL = Qi[1] - 0.5 * (dt / dx) * (F(Qi[1]) - F(Qi[0]));
+			fvCell QR = Qiplus1[0] - 0.5 * (dt / dx) * (F(Qiplus1[1]) - F(Qiplus1[0]));
+
+			f_iplushalf_n[i-1] = calculateFlux(QL, QR, f );
+
+			Qi = Qiplus1;
+		}
 		
 		fullTimeStepUpdate();
+		//outputFile << "t=" << t << "\n";
 		output();
 		outputFile << "\n\n";
 	} while (t < t1);

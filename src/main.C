@@ -13,7 +13,7 @@ int main(int argc, char* argv[]){
 	}
 	else if(argc==2){
 		std::string solver = argv[1];
-		for(int test=1; test<4; test++){
+		for(int test=1; test<6; test++){
 			const char* fileName = "/home/ojm40/Documents/MPhil_MHD/stg/config.cfg";
 			fvSim Sim(fileName, test-1, solver);
 			Sim.run();

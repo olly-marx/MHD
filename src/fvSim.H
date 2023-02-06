@@ -9,6 +9,11 @@
 
 #include <libconfig.h++>
 
+#include "fvCell.H"
+
+#ifndef FVSIM_HEADER
+#define FVSIM_HEADER
+
 class fvSim{
 	public:
 		fvSim(const char*, int, std::string);
@@ -20,12 +25,16 @@ class fvSim{
 		void output();
 		void computeTimeStep();
 		void fullTimeStepUpdate();
-		double halfTimeStepUpdate(double, double);
-		double F(double);
-		double LF_Flux(double, double);
-		double Richt_Flux(double);
-		double FORCE_Flux(double, double);
-		double calculateFlux(double, double, std::function<double(double,double)>);
+		const fvCell halfTimeStepUpdate(const fvCell&, const fvCell&);
+		const fvCell F(const fvCell&);
+		const fvCell LF_Flux(const fvCell&, const fvCell&);
+		const fvCell Richt_Flux(const fvCell&);
+		const fvCell FORCE_Flux(const fvCell&, const fvCell&);
+		std::array<fvCell,2> DataReconstruction(const fvCell&, const fvCell&,
+				const fvCell&);
+		const fvCell calculateFlux(const fvCell&, const fvCell&, 
+				std::function<const fvCell(const fvCell&,const fvCell&)>);
+		double superbee(const double&);
 
 		// Private member variables
 		unsigned int    nCells;
@@ -33,17 +42,19 @@ class fvSim{
 		double          x1;
 		double          t0;
 		double          t1;
-		double          a;
+		double          gamma;
 		double          CFL;
 		double          dx;
 		double          dt;
 		std::string     m_solver;
 
 		// Main Grid and Temps
-		std::vector<double> Q;
-		std::vector<double> Q_i_nplus1;
-		std::vector<double> f_iplushalf_n;
+		std::vector<fvCell> Q;
+		std::vector<fvCell> Q_i_nplus1;
+		std::vector<fvCell> f_iplushalf_n;
 
 		// Other files
 		std::ofstream outputFile;
 };
+
+#endif

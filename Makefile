@@ -56,7 +56,7 @@ RMSUFFIX := $(patsubst %.dat, %, $(FINDDATS))
 RMDIR := $(patsubst ./dat/%, %, $(RMSUFFIX))
 plot:
 	for filename in $(RMDIR) ; do \
-		gnuplot -e "filename='$$filename'" ./dat/produceGif.plt ; \
+		gnuplot -e "filename='$$filename'" ./produceGif.plt ; \
 	done
 
 clean:
