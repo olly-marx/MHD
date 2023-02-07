@@ -42,13 +42,21 @@ refactor:
 	CFLAGS += $(REFFLAGS)
 	$(TARGET)
 
-PHONY += testLF
-testLF:
+PHONY += LF
+LF:
 	$(TARGET) LF
 
-PHONY += testFORCE
-testFORCE:
+PHONY += FORCE
+FORCE:
 	$(TARGET) FORCE
+
+PHONY += SLIC
+SLIC:
+	$(TARGET) SLIC
+
+PHONY += HLL
+HLL:
+	$(TARGET) HLL
 
 PHONY += plot
 FINDDATS = $(wildcard $(DAT)/*.dat)

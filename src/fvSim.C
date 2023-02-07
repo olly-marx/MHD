@@ -73,7 +73,6 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 
 	// Write initial data to file
 	output();
-	outputFile << "\n\n";
 }
 
 // Destructor
@@ -172,11 +171,28 @@ const fvCell fvSim::Richt_Flux(const fvCell& Q_half){
 const fvCell fvSim::FORCE_Flux(const fvCell& QL, const fvCell& QR){
 	const fvCell LF = LF_Flux(QL, QR);
 	const fvCell Q_half = halfTimeStepUpdate(QL, QR);
-	const fvCell Richt = Richt_Flux(Q_half);
+	const fvCell Richt = F(Q_half);
 	return 0.5 * (LF + Richt);
 }
 
-std::array<fvCell,2> fvSim::DataReconstruction(const fvCell& QL, const fvCell& Qi, const fvCell& QR){
+const fvCell fvSim::HLL_Flux(const fvCell& QL, const fvCell& QR){
+	double SL, SR;
+	waveSpeedEstimates(QL, QR, SL, SR);
+
+	fvCell fL = F(QL);                                                        
+	fvCell fR = F(QR);                                                        
+       	fvCell fHLL = (1.0 / (SR-SL)) * (SR*fL - SL*fR + SL * SR * (QR - QL));    
+       	                                                                          
+       	if(SL >= 0)                                                               
+       	        return fL;                                                        
+       	else if(SR <= 0)                                                          
+       	        return fR;                                                        
+       	else                                                                      
+       	        return fHLL;                                                      
+       	                                                                          
+}                    
+
+std::array<fvCell,2> fvSim::linearDataReconstruction(const fvCell& QL, const fvCell& Qi, const fvCell& QR){
 	fvCell dL = Qi - QL; 
 	double dL_E = fabs(dL[2]) <= 1.0e-8 ? 1.0e-8 : dL[2];
 	fvCell dR = QR - Qi; 
@@ -191,6 +207,30 @@ std::array<fvCell,2> fvSim::DataReconstruction(const fvCell& QL, const fvCell& Q
 	std::array<fvCell,2> result;
 	result[0] = Qi - 0.5 * xi * di;
 	result[1] = Qi + 0.5 * xi * di;
+	
+	return result;
+}
+
+void fvSim::waveSpeedEstimates(const fvCell& QL, const fvCell& QR, double& SL, double& SR){
+       fvCell WL = QL.toPrim(gamma);                                             
+       fvCell WR = QR.toPrim(gamma);                                             
+       double csL  = sqrt(gamma * WL[2] / WR[0]);                                
+       double csR  = sqrt(gamma * WR[2] / WR[0]);                                
+       //SR = std::max(fabs(WL[1]) + csL, fabs(WR[1]) + csR);               
+       //SL = -SR;                                                          
+       SL = WL[1] - csL;
+       SR = WR[1] + csR;
+       //SL = std::min(WL[1] - csL , WR[1] - csR);
+       //SR = std::max(WL[1] + csL , WR[1] + csR);
+                                                                                 
+}
+
+std::array<fvCell,2> fvSim::constantDataReconstruction(const fvCell& Ql, const fvCell& Qi, const fvCell& QR)
+{
+	std::array<fvCell,2> result;
+
+	result[0] = Qi;
+	result[1] = Qi;
 	
 	return result;
 }
@@ -215,15 +255,42 @@ const fvCell fvSim::calculateFlux(const fvCell& QL, const fvCell& QR,
 	return func(QL, QR);
 }
 
+// Reconstruct Data is used to activate linear data reconstruction or not.
+std::array<fvCell,2> fvSim::reconstructData(const fvCell& QL, const fvCell& Qi, const fvCell& QR,
+		std::function<std::array<fvCell,2>(const fvCell&,const fvCell&, const fvCell&)> func){
+	return func(QL, Qi, QR);
+}
+
 void fvSim::run(){
 
 	// Create a function pointer based on chosen flux function
 	// https://stackoverflow.com/questions/7582546/using-generic-stdfunction-objects-with-member-functions-in-one-class
 	std::function<const fvCell(const fvCell&,const fvCell&)> f; 
+	std::function<std::array<fvCell,2>(const fvCell&,const fvCell&,const fvCell&)> g; 
 	if(m_solver == "LF")
+	{
 		f = std::bind(&fvSim::LF_Flux, this, std::placeholders::_1, std::placeholders::_2);
+		g = std::bind(&fvSim::constantDataReconstruction, this, std::placeholders::_1,
+				std::placeholders::_2, std::placeholders::_3);
+	}
 	else if(m_solver == "FORCE")
+	{
 		f = std::bind(&fvSim::FORCE_Flux, this, std::placeholders::_1, std::placeholders::_2);
+		g = std::bind(&fvSim::constantDataReconstruction, this, std::placeholders::_1,
+				std::placeholders::_2, std::placeholders::_3);
+	}
+	else if(m_solver == "HLL")
+	{
+		f = std::bind(&fvSim::HLL_Flux, this, std::placeholders::_1, std::placeholders::_2);
+		g = std::bind(&fvSim::linearDataReconstruction, this, std::placeholders::_1,
+				std::placeholders::_2, std::placeholders::_3);
+	}
+	else if(m_solver == "SLIC")
+	{
+		f = std::bind(&fvSim::FORCE_Flux, this, std::placeholders::_1, std::placeholders::_2);
+		g = std::bind(&fvSim::linearDataReconstruction, this, std::placeholders::_1,
+				std::placeholders::_2, std::placeholders::_3);
+	}
 
 	double t = t0;
 	do{
@@ -244,7 +311,7 @@ void fvSim::run(){
 		for(std::size_t i=1;i<nCells+2;i++){
 			// Reconstruct data at cell i+1, and then set data at i
 			// equal to data at i+1 for next iteration
-			Qiplus1 = DataReconstruction(Q[i-1], Q[i], Q[i+1]);
+			Qiplus1 = reconstructData(Q[i-1], Q[i], Q[i+1], g);
 
 			// We set the right value of the cell interface problem
 			// equal to the left reconstrution of the right hand
@@ -260,8 +327,8 @@ void fvSim::run(){
 		}
 		
 		fullTimeStepUpdate();
-		//outputFile << "t=" << t << "\n";
-		output();
 		outputFile << "\n\n";
+		outputFile << "t=" << t << "\n";
+		output();
 	} while (t < t1);
 }

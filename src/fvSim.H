@@ -30,8 +30,14 @@ class fvSim{
 		const fvCell LF_Flux(const fvCell&, const fvCell&);
 		const fvCell Richt_Flux(const fvCell&);
 		const fvCell FORCE_Flux(const fvCell&, const fvCell&);
-		std::array<fvCell,2> DataReconstruction(const fvCell&, const fvCell&,
+		const fvCell HLL_Flux(const fvCell&, const fvCell&);
+		void waveSpeedEstimates(const fvCell&, const fvCell&, double&, double&);
+		std::array<fvCell,2> linearDataReconstruction(const fvCell&, const fvCell&,
 				const fvCell&);
+		std::array<fvCell,2> constantDataReconstruction(const fvCell&, const fvCell&,
+				const fvCell&);
+		std::array<fvCell,2> reconstructData(const fvCell&, const fvCell&, const fvCell&,
+			std::function<std::array<fvCell,2>(const fvCell&,const fvCell&, const fvCell&)>);
 		const fvCell calculateFlux(const fvCell&, const fvCell&, 
 				std::function<const fvCell(const fvCell&,const fvCell&)>);
 		double superbee(const double&);
