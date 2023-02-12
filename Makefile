@@ -1,7 +1,7 @@
 CC = c++
 CFLAGS = -std=c++17 -Wpedantic -Wall -Wextra -Wshadow -Wnon-virtual-dtor \
-	  -Wold-style-cast -Wcast-align -Wuseless-cast -Wsign-conversion \
-	  -Wdouble-promotion -Wnull-dereference -Wmisleading-indentation \
+	  -Wold-style-cast -Wcast-align -Wuseless-cast \
+	  -Wdouble-promotion -Wmisleading-indentation \
 	  -Wduplicated-cond -Wformat=2
 LIBFLAGS = -lconfig++
 DBGFLAGS = -g -O0 -fsanitize=address -fsanitize=bounds -lubsan
@@ -58,6 +58,10 @@ PHONY += HLL
 HLL:
 	$(TARGET) HLL
 
+PHONY += HLLC
+HLLC:
+	$(TARGET) HLLC
+
 PHONY += plot
 FINDDATS = $(wildcard $(DAT)/*.dat)
 RMSUFFIX := $(patsubst %.dat, %, $(FINDDATS))
@@ -67,9 +71,13 @@ plot:
 		gnuplot -e "filename='$$filename'" ./produceGif.plt ; \
 	done
 
+PHONY += clean
 clean:
 	rm $(OBJ)/*.o
 	rm $(BIN)/*
+
+PHONY += cleanresults
+cleanresults:
 	rm $(DAT)/*.dat
 	rm *.gif
 

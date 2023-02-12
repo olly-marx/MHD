@@ -9,6 +9,7 @@
 
 fvCell::fvCell(){
 	valC = {0.0, 0.0, 0.0};
+	m_isConservative = true;
 }
 
 fvCell::fvCell(const std::array<double,3>& inCell){
@@ -27,6 +28,10 @@ fvCell fvCell::operator+(const fvCell& a) const{
 	fvCell result;
 	for(std::size_t i=0;i<valC.size();i++)
 		result.valC[i] = valC[i] + a.valC[i];
+	if(m_isConservative==a.m_isConservative)
+		result.m_isConservative = m_isConservative;
+	else
+		std::cout << "ADDING CELLS IN DIFFERENT FORMS" << std::endl;
 	return result;
 }
 
@@ -35,6 +40,10 @@ fvCell fvCell::operator-(const fvCell& a) const{
 	fvCell result;
 	for(std::size_t i=0;i<valC.size();i++)
 		result.valC[i] = valC[i] - a.valC[i];
+	if(m_isConservative==a.m_isConservative)
+		result.m_isConservative = m_isConservative;
+	else
+		std::cout << "SUBTRACTING CELLS IN DIFFERENT FORMS" << std::endl;
 	return result;
 }
 
@@ -46,15 +55,15 @@ bool fvCell::operator==(const fvCell& a) const{
 }
 
 fvCell operator*(const double s, const fvCell& a){
-	fvCell result;
-	for(std::size_t i=0;i<3;i++)
+	fvCell result = a;
+	for(int i=0;i<3;i++)
 		result[i] = s * a[i];
 	return result;
 }
 
 fvCell operator*(const fvCell a, const double& s){
-	fvCell result;
-	for(std::size_t i=0;i<3;i++)
+	fvCell result = a;
+	for(int i=0;i<3;i++)
 		result[i] = s * a[i];
 	return result;
 }
@@ -64,11 +73,11 @@ void fvCell::operator=(const fvCell& a){
 	m_isConservative = a.m_isConservative;
 }
 
-double& fvCell::operator[](std::size_t i){
+double& fvCell::operator[](int i){
 	return valC[i];
 }
 
-double fvCell::operator[](std::size_t i) const{
+double fvCell::operator[](int i) const{
 	return valC[i];
 }
 
@@ -97,4 +106,9 @@ double fvCell::calc_e(const double& gamma) const{
 				/ valC[0]) / valC[0];
 	else 
 		return valC[2] / (valC[0] * (gamma - 1.0));
+}
+
+void fvCell::displayCell() const
+{
+	std::cout << valC[0] << " " << valC[1] << " " << valC[2] << std::endl; 
 }

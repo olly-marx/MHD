@@ -31,6 +31,7 @@ class fvSim{
 		const fvCell Richt_Flux(const fvCell&);
 		const fvCell FORCE_Flux(const fvCell&, const fvCell&);
 		const fvCell HLL_Flux(const fvCell&, const fvCell&);
+		const fvCell HLLC_Flux(const fvCell&, const fvCell&);
 		void waveSpeedEstimates(const fvCell&, const fvCell&, double&, double&);
 		std::array<fvCell,2> linearDataReconstruction(const fvCell&, const fvCell&,
 				const fvCell&);
@@ -43,7 +44,8 @@ class fvSim{
 		double superbee(const double&);
 
 		// Private member variables
-		unsigned int    nCells;
+		int             nCells;
+		int             m_ghost;
 		double          x0;
 		double          x1;
 		double          t0;
@@ -56,8 +58,11 @@ class fvSim{
 
 		// Main Grid and Temps
 		std::vector<fvCell> Q;
-		std::vector<fvCell> Q_i_nplus1;
-		std::vector<fvCell> f_iplushalf_n;
+		std::vector<fvCell> Q_new;
+		std::vector<fvCell> Q_bc;
+		std::vector<fvCell> f_half;
+
+		std::vector<double> xCentroids;
 
 		// Other files
 		std::ofstream outputFile;

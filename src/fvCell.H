@@ -17,18 +17,16 @@ class fvCell{
 		fvCell  operator-(const fvCell&) const;
 		//fvCell  operator*(const double) const;
 		void    operator=(const fvCell&);
-		double& operator[](std::size_t);
-		double  operator[](std::size_t) const;
-		bool  operator==(const fvCell&) const;
+		double& operator[](int);
+		double  operator[](int) const;
+		bool    operator==(const fvCell&) const;
 		fvCell  toPrim(const double&) const;
 		fvCell  toCons(const double&);
-
-	private:
-		//Private member functions
 		double calc_e(const double&) const;
-		std::array<double,3> valC;
-
+		void displayCell() const;
+	private:
 		// Private member variables
+		std::array<double,3> valC;
 		bool m_isConservative;
 };
 
