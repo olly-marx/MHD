@@ -48,21 +48,25 @@ class fvSim{
 		int             m_ghost;
 		double          x0;
 		double          x1;
+		double          y0;
+		double          y1;
 		double          t0;
 		double          t1;
 		double          gamma;
 		double          CFL;
 		double          dx;
+		double          dy;
 		double          dt;
 		std::string     m_solver;
 
 		// Main Grid and Temps
-		std::vector<fvCell> Q;
-		std::vector<fvCell> Q_new;
-		std::vector<fvCell> Q_bc;
-		std::vector<fvCell> f_half;
+		std::vector<std::vector<fvCell>> Q;
+		std::vector<std::vector<fvCell>> Q_new;
+		std::vector<std::vector<fvCell>> Q_bc;
+		std::vector<std::vector<fvCell>> f_half;
 
 		std::vector<double> xCentroids;
+		std::vector<double> yCentroids;
 
 		// Other files
 		std::ofstream outputFile;

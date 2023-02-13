@@ -43,6 +43,8 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 		if(!(test.lookupValue("nCells", nCells)
 			&& test.lookupValue("x0", x0)
 			&& test.lookupValue("x1", x1)
+			&& test.lookupValue("y0", y0)
+			&& test.lookupValue("y1", y1)
 			&& test.lookupValue("t0", t0)
 			&& test.lookupValue("t1", t1)
 			&& test.lookupValue("CFL", CFL)
@@ -50,21 +52,15 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 			std::cout << "Settings for test #" << testNum+1 << " read in."
 				<< std::endl;
 		const libconfig::Setting& range = tests[testNum]["inits"];
-		std::cout << "Solv: " << m_solver << " Test: " << testNum << " x0 " 
-			<< x0 << " x1 " << x1 << " t0 " << t0 << " t1 " << t1 << " CFL " << CFL << std::endl;
-
-		// Init storage arrays
-		int problemSize = nCells + 2 * m_ghost;
-
-		Q.resize(nCells);
-		Q_new.resize(nCells);
-		Q_bc.resize(problemSize);
-		f_half.resize(nCells+1);
-
-		xCentroids.resize(nCells);
-
-		// Initialize constant run-time variables
-		dx = (x1 - x0) / nCells; 
+		std::cout << "Solv: " << m_solver << " Test: " << testNum 
+			<< " x0 " << x0 
+			<< " x1 " << x1 
+			<< " y0 " << y0 
+			<< " y1 " << y1 
+			<< " t0 " << t0 
+			<< " t1 " << t1 
+			<< " CFL " << CFL 
+			<< std::endl;
 
 		// Create output file name and convert to char*
 		std::string s = "/home/ojm40/Documents/MPhil_MHD/dat/output_" 
@@ -126,42 +122,74 @@ void fvSim::run(){
 				std::placeholders::_2, std::placeholders::_3);
 	}
 
+	std::cout << "Running." << std::flush;
+
 	double t = t0;
 	do
 	{
+		std::cout << "+" << std::flush;
 		computeTimeStep();
-		std::cout << "dt " << dt << std::endl;
 		t = t + dt;
 
 		// Copy the actual domain into the ghost cell domain
 		for(int i=0;i<nCells;i++)
 		{
-			Q_bc[i+m_ghost] = Q[i];
+			for(int j=0;j<nCells;j++)
+			{
+				Q_bc[i+m_ghost][j+m_ghost] = Q[i][j];
+			}
 		}
 
 		// Do boundary conditions here 
 		// Transmissive
+		//
+		// LENGTHS
 		for(int i=0;i<m_ghost;i++)
 		{
-			Q_bc[i] = Q[0];
-			Q_bc[nCells + m_ghost + i] = Q[nCells-1];
+			for(int j=0;j<nCells;j++)
+			{
+				Q_bc[i][j+m_ghost] = Q[0][j];
+				Q_bc[i + m_ghost + nCells][j + m_ghost] = Q[nCells-1][j];
+			}
+		}
+		// BREADTHS
+		for(int i=0;i<nCells;i++)
+		{
+			for(int j=0;j<m_ghost;j++)
+			{
+				Q_bc[i+m_ghost][j] = Q[i][0];
+				Q_bc[i + m_ghost][j + m_ghost + nCells] = Q[i][nCells-1];
+			}
 		}
 
 		// Qi stores left and right states
+		// Initially just for the x direction reconstruction and flux
+		// calculations
 		std::array<fvCell,2> Qi;
 
-		std::array<fvCell,2> Qiplus1 = reconstructData(Q_bc[0], Q_bc[1], Q_bc[2], g);
-				
-		for(int i=1;i<nCells+m_ghost;i++)
+		for(int j=0;j<nCells;j++)
 		{
-			Qi = Qiplus1;
+			std::array<fvCell,2> Qiplus1 = reconstructData(Q_bc[0][j+m_ghost],
+								       Q_bc[1][j+m_ghost], 
+								       Q_bc[2][j+m_ghost],
+								       g );
+				
+			for(int i=1;i<nCells+m_ghost;i++)
+			{
 
-			Qiplus1 = reconstructData(Q_bc[i], Q_bc[i+1], Q_bc[i+2], g);
+				Qi = Qiplus1;
 
-			const fvCell QL = Qi[1] - (0.5 * dt / dx) * (F(Qi[1]) - F(Qi[0]));
-			const fvCell QR = Qiplus1[0] - (0.5 * dt / dx) * (F(Qiplus1[1]) - F(Qiplus1[0]));
+				Qiplus1 = reconstructData(Q_bc[i][j+m_ghost],
+						          Q_bc[i+1][j+m_ghost],
+							  Q_bc[i+2][j+m_ghost], 
+							  g);
 
-			f_half[i-1] = calculateFlux(QL, QR, f);
+				const fvCell QL = Qi[1] - (0.5 * dt / dx) * (F(Qi[1]) - F(Qi[0]));
+				const fvCell QR = Qiplus1[0] - (0.5 * dt / dx) * (F(Qiplus1[1]) - F(Qiplus1[0]));
+
+				f_half[i-1][j] = calculateFlux(QL, QR, f);
+
+			}
 		}
 		
 		fullTimeStepUpdate();
@@ -170,16 +198,47 @@ void fvSim::run(){
 		output();
 
 	} while (t < t1);
+	
+	std::cout << std::endl;
 }
 
 // This function will initialize the grid based on the test case chosen
 void fvSim::init(const libconfig::Setting& ranges)
 {
+	// Init storage arrays
+	int problemSize = nCells + 2 * m_ghost;
+
+	Q.resize(nCells);
+	Q_new.resize(nCells);
+	Q_bc.resize(problemSize);
+	f_half.resize(nCells+1);
+
+	for(int i=0;i<problemSize;i++)
+	{
+		Q_bc[i].resize(problemSize);
+		if(i<nCells)
+		{
+			Q[i].resize(nCells);
+			Q_new[i].resize(nCells);
+		}
+		if(i<nCells+1)
+		{
+			f_half[i].resize(nCells);
+		}
+	}
+
+	xCentroids.resize(nCells);
+	yCentroids.resize(nCells);
+
+	// Initialize constant run-time variables
+	dx = (x1 - x0) / nCells; 
+	dy = (y1 - y0) / nCells; 
+
 	int count = ranges.getLength();
 
-	for(int i=0;i<count;i++)
+	for(int n=0;n<count;n++)
 	{
-		const libconfig::Setting& range = ranges[i];
+		const libconfig::Setting& range = ranges[n];
 		double xi, xf, rho, u, v, p;
 
 		if(!(range.lookupValue("xi", xi)
@@ -190,15 +249,20 @@ void fvSim::init(const libconfig::Setting& ranges)
 			&& range.lookupValue("p", p)))
 			continue;
 
-		for(int j=0;j<nCells;j++)
+		for(int i=0;i<nCells;i++)
 		{
-			double x = x0 + (j + 0.5) * dx;
-			double y = 0.0;
+			for(int j=0;j<nCells;j++)
+			{
+				double x = x0 + (i + 0.5) * dx;
+				double y = y0 + (j + 0.5) * dy;
 
-			xCentroids[j] = x;
+				xCentroids[i] = x;
+				yCentroids[j] = y;
 
-			if(x <= xf && x >= xi)
-				Q[j] = fvCell({rho, u, v, p}).toCons(gamma);
+				if(x <= xf && x >= xi)
+					Q[i][j] = fvCell({rho, u, v, p}).toCons(gamma);
+
+			}
 		}
 	}
 }
@@ -208,9 +272,10 @@ void fvSim::output()
 {
 	for(int i=0;i<nCells;i++)
 	{
-		fvCell Wi = Q[i].toPrim(gamma);
+		fvCell Wi = Q[i][nCells/2].toPrim(gamma);
 
 		outputFile << xCentroids[i] << " " 
+			   << yCentroids[nCells/2] << " "
 			   << Wi[0] << " " 
 			   << Wi[1] << " " 
 			   << Wi[2] << " "
@@ -226,9 +291,12 @@ void fvSim::output()
 // Uses Q_i_n, Q_i+1_n, f_i+1/2_n and f_i-1/2_n to give Q_i_n+1
 void fvSim::fullTimeStepUpdate()
 {
-	for(int i=0;i<nCells;i++)
+	for(int j=0;j<nCells;j++)
 	{
-		Q_new[i] = Q_bc[i+m_ghost] - (dt / dx) * (f_half[i+1] - f_half[i]);
+		for(int i=0;i<nCells;i++)
+		{
+			Q_new[i][j] = Q_bc[i+m_ghost][j+m_ghost] - (dt / dx) * (f_half[i+1][j] - f_half[i][j]);
+		}
 	}
 	Q = Q_new;
 }
@@ -240,12 +308,15 @@ void fvSim::computeTimeStep()
 	double SL, SR;
 	double max = 0.0;
 
-	for(int i=0;i<nCells-1;i++)
+	for(int j=0;j<nCells;j++)
 	{
-		waveSpeedEstimates(Q[i], Q[i+1], SL, SR);
-		SL = fabs(SL);
-		SR = fabs(SR);
-		max = std::max(max, std::max(SL,SR));;
+		for(int i=0;i<nCells-1;i++)
+		{
+			waveSpeedEstimates(Q[i][j], Q[i+1][j], SL, SR);
+			SL = fabs(SL);
+			SR = fabs(SR);
+			max = std::max(max, std::max(SL,SR));;
+		}
 	}
 
 	dt = CFL * dx / max;
@@ -454,8 +525,8 @@ void fvSim::waveSpeedEstimates(const fvCell& QL, const fvCell& QR, double& SL, d
 		qR = sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pstar / pR - 1.0));
 	}
 
-	SL = std::max(uL - aL * qL, vL - aL * qL);
-	SR = std::max(uR + aR * qR, vR + aR * qR);
+	SL = uL - aL * qL;
+	SR = uR + aR * qR;
 }
 
 // Calculate flux is used to parse any chosen flux function in based on user
