@@ -180,12 +180,13 @@ void fvSim::init(const libconfig::Setting& ranges)
 	for(int i=0;i<count;i++)
 	{
 		const libconfig::Setting& range = ranges[i];
-		double xi, xf, rho, u, p;
+		double xi, xf, rho, u, v, p;
 
 		if(!(range.lookupValue("xi", xi)
 			&& range.lookupValue("xf", xf)
 			&& range.lookupValue("rho", rho)
 			&& range.lookupValue("u", u)
+			&& range.lookupValue("v", v)
 			&& range.lookupValue("p", p)))
 			continue;
 
@@ -197,7 +198,7 @@ void fvSim::init(const libconfig::Setting& ranges)
 			xCentroids[j] = x;
 
 			if(x <= xf && x >= xi)
-				Q[j] = fvCell({rho, u, p}).toCons(gamma);
+				Q[j] = fvCell({rho, u, v, p}).toCons(gamma);
 		}
 	}
 }
@@ -213,6 +214,7 @@ void fvSim::output()
 			   << Wi[0] << " " 
 			   << Wi[1] << " " 
 			   << Wi[2] << " "
+			   << Wi[3] << " "
 			   << Wi.calc_e(gamma)
 			   << std::endl;
 	}
@@ -255,11 +257,12 @@ const fvCell fvSim::F(const fvCell& Qi)
 {
 	const fvCell Wi = Qi.toPrim(gamma);
 	
-	double f0 = Qi[1];
-	double f1 = Wi[0] * Wi[1] * Wi[1] + Wi[2];
-	double f2 = (Qi[2] + Wi[2]) * Wi[1];
+	double f0 = Wi[0] * Wi[1];
+	double f1 = Wi[0] * Wi[1] * Wi[1] + Wi[3];
+	double f2 = Wi[0] * Wi[1] * Wi[2];
+	double f3 = (Qi[3] + Wi[3]) * Wi[1];
 
-	return fvCell({f0, f1, f2}, true);
+	return fvCell({f0, f1, f2, f3}, true);
 }
 
 // Compute a half time step update of the data in Q_i_n giving Q_i+1/2_n+1/2
@@ -322,14 +325,16 @@ const fvCell fvSim::HLLC_Flux(const fvCell& QL, const fvCell& QR)
 		      rhoR  = QR[0],
 		      uL    = WL[1],
 		      uR    = WR[1],
-		      pL    = WL[2],
-		      pR    = WR[2],
-		      rhovL = QL[1],
-		      rhovR = QR[1],
-		      EL    = QL[2],
-		      ER    = QR[2];
+		      vL    = WL[2],
+		      vR    = WR[2],
+		      pL    = WL[3],
+		      pR    = WR[3],
+		      rhouL = QL[1],
+		      rhouR = QR[1],
+		      EL    = QL[3],
+		      ER    = QR[3];
 
-	Sstar = (pR - pL + rhovL * (SL - uL) - rhovR * (SR - uR)) 
+	Sstar = (pR - pL + rhouL * (SL - uL) - rhouR * (SR - uR)) 
 		/ (rhoL * (SL - uL) - rhoR * (SR - uR));
 
 	double prefixL = rhoL * (SL - uL) / (SL - Sstar);
@@ -338,8 +343,8 @@ const fvCell fvSim::HLLC_Flux(const fvCell& QL, const fvCell& QR)
 	double ELstar = EL / rhoL + (Sstar - uL) * (Sstar + pL / (rhoL * (SL - uL)));
 	double ERstar = ER / rhoR + (Sstar - uR) * (Sstar + pR / (rhoR * (SR - uR)));
 
-	const fvCell QstarL = prefixL * fvCell({1.0, Sstar, ELstar}, true);
-	const fvCell QstarR = prefixR * fvCell({1.0, Sstar, ERstar}, true);
+	const fvCell QstarL = prefixL * fvCell({1.0, Sstar, vL, ELstar}, true);
+	const fvCell QstarR = prefixR * fvCell({1.0, Sstar, vL, ERstar}, true);
 
 	const fvCell fL = F(QL);                                                        
 	const fvCell fR = F(QR);                                                        
@@ -373,9 +378,9 @@ std::array<fvCell,2> fvSim::constantDataReconstruction(const fvCell& Ql, const f
 
 std::array<fvCell,2> fvSim::linearDataReconstruction(const fvCell& QL, const fvCell& Qi, const fvCell& QR){
 	fvCell dL = Qi - QL; 
-	double dL_E = fabs(dL[2]) <= 1.0e-8 ? 1.0e-8 : dL[2];
+	double dL_E = fabs(dL[3]) <= 1.0e-8 ? 1.0e-8 : dL[2];
 	fvCell dR = QR - Qi; 
-	double dR_E = fabs(dR[2]) <= 1.0e-8 ? 1.0e-8 : dR[2];
+	double dR_E = fabs(dR[3]) <= 1.0e-8 ? 1.0e-8 : dR[2];
 
 	double r = dL_E / dR_E;
 
@@ -409,20 +414,23 @@ void fvSim::waveSpeedEstimates(const fvCell& QL, const fvCell& QR, double& SL, d
        fvCell WL = QL.toPrim(gamma);                                             
        fvCell WR = QR.toPrim(gamma);                                             
 
-       double aL  = sqrt(gamma * WL[2] / WL[0]);                                
-       double aR  = sqrt(gamma * WR[2] / WR[0]);                                
+       double aL  = sqrt(gamma * WL[3] / WL[0]);                                
+       double aR  = sqrt(gamma * WR[3] / WR[0]);                                
 
        const double& rhoL  = QL[0],
 		     rhoR  = QR[0],
 		     uL    = WL[1],
 		     uR    = WR[1],
-		     pL    = WL[2],
-		     pR    = WR[2];
+		     vL    = WL[2],
+		     vR    = WR[2],
+		     pL    = WL[3],
+		     pR    = WR[3];
 
 	double rhobar = 0.5 * (rhoL + rhoR);
 	double abar   = 0.5 * (aL + aR);
-	double ppvrs  = 0.5 * (pL + pR) - 0.5 * (uR - uL) * rhobar * abar;
-	double pstar  = std::max(0.0, ppvrs);
+	double ppvrs_x  = 0.5 * (pL + pR) - 0.5 * (uR - uL) * rhobar * abar;
+	double ppvrs_y  = 0.5 * (pL + pR) - 0.5 * (vR - vL) * rhobar * abar;
+	double pstar  = std::max(0.0, std::max(ppvrs_x, ppvrs_y));
 
 	double qL, qR;
 
@@ -446,8 +454,8 @@ void fvSim::waveSpeedEstimates(const fvCell& QL, const fvCell& QR, double& SL, d
 		qR = sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pstar / pR - 1.0));
 	}
 
-	SL = uL - aL * qL;
-	SR = uR + aR * qR;
+	SL = std::max(uL - aL * qL, vL - aL * qL);
+	SR = std::max(uR + aR * qR, vR + aR * qR);
 }
 
 // Calculate flux is used to parse any chosen flux function in based on user

@@ -8,10 +8,12 @@
 #ifndef FVCELL_HEADER
 #define FVCELL_HEADER
 
-class fvCell{
+class fvCell
+{
+	static const int nVars = 4;
 	public:
-		fvCell(const std::array<double,3>&);
-		fvCell(const std::array<double,3>&, bool);
+		fvCell(const std::array<double,nVars>&);
+		fvCell(const std::array<double,nVars>&, bool);
 		fvCell();
 		fvCell  operator+(const fvCell&) const;
 		fvCell  operator-(const fvCell&) const;
@@ -26,7 +28,7 @@ class fvCell{
 		void displayCell() const;
 	private:
 		// Private member variables
-		std::array<double,3> valC;
+		std::array<double,nVars> valC;
 		bool m_isConservative;
 };
 
