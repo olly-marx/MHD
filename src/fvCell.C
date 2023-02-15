@@ -101,9 +101,9 @@ fvCell fvCell::toCons(const double& gamma){
 	double rho  = valC[0], 
 	       u    = valC[1],
 	       v    = valC[2];
-	double kE   = 0.5 * rho * u * u; 
+	double kE   = 0.5 * (u*u + v*v); 
 	double e    = calc_e(gamma);
-	double E    = rho * e + kE;
+	double E    = rho * (e + kE);
 
 	return fvCell({rho, rho*u, rho*v, E}, true);
 }

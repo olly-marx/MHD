@@ -7,6 +7,7 @@
 #include <fstream>
 #include <cstddef>
 #include <iterator>
+#include <ostream>
 #include <string>
 #include <vector>
 #include <cmath>
@@ -18,6 +19,8 @@
 // Headers
 #include "fvSim.H"
 #include "fvCell.H"
+#include "DataReconstruction.H"
+#include "FluxFunctions.H"
 
 // Constructor, will take in settings file and test number to construct full sim
 // with initial conditions and configs for certain tests
@@ -27,7 +30,7 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 	m_ghost = 2;
 
 	libconfig::Config cfg;
-
+	
 	try{
 		cfg.readFile(configFileName);
 	}
@@ -48,11 +51,13 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 			&& test.lookupValue("t0", t0)
 			&& test.lookupValue("t1", t1)
 			&& test.lookupValue("CFL", CFL)
+			&& test.lookupValue("test", m_test)
 			&& test.lookupValue("gamma", gamma)))
 			std::cout << "Settings for test #" << testNum+1 << " read in."
 				<< std::endl;
 		const libconfig::Setting& range = tests[testNum]["inits"];
-		std::cout << "Solv: " << m_solver << " Test: " << testNum 
+		std::cout << "Solv: " << m_solver << " Test: " << (testNum+1) 
+			<< " nCells " << nCells 
 			<< " x0 " << x0 
 			<< " x1 " << x1 
 			<< " y0 " << y0 
@@ -64,7 +69,7 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 
 		// Create output file name and convert to char*
 		std::string s = "/home/ojm40/Documents/MPhil_MHD/dat/output_" 
-			+ m_solver + "_test" + std::to_string(testNum) + ".dat";
+			+ m_solver + "_test" + std::to_string(testNum+1) + ".dat";
 		const char* outputFileName = s.c_str();
 
 		outputFile.open(outputFileName);
@@ -78,6 +83,7 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 
 	// Write initial data to file
 	output();
+	std::cout << "Running:  #Beg" << std::flush;
 }
 
 // Destructor
@@ -89,47 +95,47 @@ void fvSim::run(){
 
 	// Create a function pointer based on chosen flux function
 	// https://stackoverflow.com/questions/7582546/using-generic-stdfunction-objects-with-member-functions-in-one-class
-	std::function<const fvCell(const fvCell&,const fvCell&)> f; 
-	std::function<std::array<fvCell,2>(const fvCell&,const fvCell&,const fvCell&)> g; 
+	std::function<const fvCell(const fvCell&,const fvCell&, const double&, const double&, const double&, bool)> f; 
+	std::function< std::array<fvCell,2> (const fvCell&,const fvCell&,const fvCell&) > g; 
+	
 	if(m_solver == "LF")
 	{
-		f = std::bind(&fvSim::LF_Flux, this, std::placeholders::_1, std::placeholders::_2);
-		g = std::bind(&fvSim::constantDataReconstruction, this, std::placeholders::_1,
-				std::placeholders::_2, std::placeholders::_3);
+		f = LF_Flux;
+		g = constantDataReconstruction;
 	}
 	else if(m_solver == "FORCE")
 	{
-		f = std::bind(&fvSim::FORCE_Flux, this, std::placeholders::_1, std::placeholders::_2);
-		g = std::bind(&fvSim::constantDataReconstruction, this, std::placeholders::_1,
-				std::placeholders::_2, std::placeholders::_3);
+		f = FORCE_Flux;
+		g = constantDataReconstruction;
 	}
 	else if(m_solver == "HLL")
 	{
-		f = std::bind(&fvSim::HLL_Flux, this, std::placeholders::_1, std::placeholders::_2);
-		g = std::bind(&fvSim::constantDataReconstruction, this, std::placeholders::_1,
-				std::placeholders::_2, std::placeholders::_3);
+		f = HLL_Flux;
+		g = constantDataReconstruction;
 	}
 	else if(m_solver == "SLIC")
 	{
-		f = std::bind(&fvSim::FORCE_Flux, this, std::placeholders::_1, std::placeholders::_2);
-		g = std::bind(&fvSim::linearDataReconstruction, this, std::placeholders::_1,
-				std::placeholders::_2, std::placeholders::_3);
+		f = FORCE_Flux;
+		g = linearDataReconstruction;
 	}
 	else if(m_solver == "HLLC")
 	{
-		f = std::bind(&fvSim::HLLC_Flux, this, std::placeholders::_1, std::placeholders::_2);
-		g = std::bind(&fvSim::constantDataReconstruction, this, std::placeholders::_1,
-				std::placeholders::_2, std::placeholders::_3);
+		f = HLLC_Flux;
+		g = linearDataReconstruction;
 	}
 
-	std::cout << "Running." << std::flush;
-
-	double t = t0;
+	double printNumber = 1.0;
+	bool printedAtTime = false;
+	double nPrints = 10.0;
+	double fracGap = 1.0/nPrints;
+	t = t0;
 	do
 	{
 		std::cout << "+" << std::flush;
 		computeTimeStep();
 		t = t + dt;
+
+		//std::cout << "dt " << dt << std::endl;
 
 		// Copy the actual domain into the ghost cell domain
 		for(int i=0;i<nCells;i++)
@@ -152,20 +158,13 @@ void fvSim::run(){
 				Q_bc[i + m_ghost + nCells][j + m_ghost] = Q[nCells-1][j];
 			}
 		}
-		// BREADTHS
-		for(int i=0;i<nCells;i++)
-		{
-			for(int j=0;j<m_ghost;j++)
-			{
-				Q_bc[i+m_ghost][j] = Q[i][0];
-				Q_bc[i + m_ghost][j + m_ghost + nCells] = Q[i][nCells-1];
-			}
-		}
 
 		// Qi stores left and right states
 		// Initially just for the x direction reconstruction and flux
 		// calculations
 		std::array<fvCell,2> Qi;
+
+		bool x_dir = true;
 
 		for(int j=0;j<nCells;j++)
 		{
@@ -184,23 +183,144 @@ void fvSim::run(){
 							  Q_bc[i+2][j+m_ghost], 
 							  g);
 
-				const fvCell QL = Qi[1] - (0.5 * dt / dx) * (F(Qi[1]) - F(Qi[0]));
-				const fvCell QR = Qiplus1[0] - (0.5 * dt / dx) * (F(Qiplus1[1]) - F(Qiplus1[0]));
+				const fvCell dFL = (F(Qi[1], gamma, x_dir) - F(Qi[0], gamma, x_dir));
+				const fvCell dFR = (F(Qiplus1[1], gamma, x_dir) - F(Qiplus1[0], gamma, x_dir));
 
-				f_half[i-1][j] = calculateFlux(QL, QR, f);
+				const fvCell QL = Qi[1] - (0.5 * dt / dx) * dFL;
+				const fvCell QR = Qiplus1[0] - (0.5 * dt / dx) * dFR;
+
+				f_half[i-1][j] = calculateFlux(QL, QR, dx, dt, gamma, x_dir, f);
 
 			}
 		}
 		
-		fullTimeStepUpdate();
-		outputFile << "\n\n";
-		outputFile << "t=" << t << "\n";
-		output();
+		fullTimeStepUpdate(x_dir);
+
+		x_dir = false;
+
+		// Copy the actual domain into the ghost cell domain
+		for(int i=0;i<nCells;i++)
+		{
+			for(int j=0;j<nCells;j++)
+			{
+				Q_bc[i+m_ghost][j+m_ghost] = Q[i][j];
+			}
+		}
+
+		// BREADTHS
+		for(int i=0;i<nCells;i++)
+		{
+			for(int j=0;j<m_ghost;j++)
+			{
+				Q_bc[i+m_ghost][j] = Q[i][0];
+				Q_bc[i + m_ghost][j + m_ghost + nCells] = Q[i][nCells-1];
+			}
+		}
+
+		for(int i=0;i<nCells;i++)
+		{
+			std::array<fvCell,2> Qiplus1 = reconstructData(Q_bc[i+m_ghost][0],
+								       Q_bc[i+m_ghost][1], 
+								       Q_bc[i+m_ghost][2],
+								       g );
+				
+			for(int j=1;j<nCells+m_ghost;j++)
+			{
+
+				Qi = Qiplus1;
+
+				Qiplus1 = reconstructData(Q_bc[i+m_ghost][j],
+						          Q_bc[i+m_ghost][j+1],
+							  Q_bc[i+m_ghost][j+2], 
+							  g);
+
+				const fvCell dFL = (F(Qi[1], gamma, x_dir) - F(Qi[0], gamma, x_dir));
+				const fvCell dFR = (F(Qiplus1[1], gamma, x_dir) - F(Qiplus1[0], gamma, x_dir));
+
+				const fvCell QL = Qi[1] - (0.5 * dt / dx) * dFL;
+				const fvCell QR = Qiplus1[0] - (0.5 * dt / dx) * dFR;
+
+				f_half[i][j-1] = calculateFlux(QL, QR, dx, dt, gamma, x_dir, f);
+
+			}
+		}
+		
+		fullTimeStepUpdate(x_dir);
+
+		double tFrac = t/t1;
+		double scale = pow(10.0, ceil(log10(fabs(tFrac))) + 2);
+		tFrac = round(tFrac * scale) / scale;
+
+		if(tFrac >= printNumber * fracGap && !printedAtTime)
+		{
+			outputFile << "\n\n";
+			outputFile << "t=" << t << "\n";
+			output();
+
+			printedAtTime = true;
+			std::cout << "#" << printNumber << std::flush;
+		}
+		else if(printedAtTime && tFrac > printNumber * fracGap)
+		{
+			printNumber+=1.0;
+			printedAtTime = false;
+		}
 
 	} while (t < t1);
+
+	outputFile << "\n\n";
+	outputFile << "t=" << t << "\n";
+	output();
 	
+	std::cout << "#Fin" << std::flush;
 	std::cout << std::endl;
 }
+
+// compute a full time step update with flux values at cell boundaries
+// This is not specific to a certain type of flux, and can therefore be defined
+// using a centred scheme or RP based scheme
+// Uses Q_i_n, Q_i+1_n, f_i+1/2_n and f_i-1/2_n to give Q_i_n+1
+void fvSim::fullTimeStepUpdate(bool x_dir)
+{
+	int x = (x_dir==true);
+	int y = (x_dir==false);
+
+	for(int j=0;j<nCells;j++)
+	{
+		for(int i=0;i<nCells;i++)
+		{
+			Q_new[i][j] = Q_bc[i+m_ghost][j+m_ghost] - (dt / dx) * (f_half[i+x][j+y] - f_half[i][j]);
+		}
+	}
+	Q = Q_new;
+}
+
+// Compute the stable time step based on the grid size and max velocity
+void fvSim::computeTimeStep()
+{
+	// Initialize temp Cell to store primitive form
+	double SL, SR;
+	double max = 0.0;
+
+	for(int j=0;j<nCells;j++)
+	{
+		for(int i=0;i<nCells-1;i++)
+		{
+			waveSpeedEstimates(Q[i][j], Q[i+1][j], SL, SR, gamma, true);
+			SL = fabs(SL);
+			SR = fabs(SR);
+			max = std::max(max, std::max(SL,SR));;
+
+			waveSpeedEstimates(Q[i][j], Q[i][j+1], SL, SR, gamma, false);
+			SL = fabs(SL);
+			SR = fabs(SR);
+			max = std::max(max, std::max(SL,SR));;
+		}
+	}
+
+	dt = std::min(CFL * std::min(dx, dy) / max, t1 - t);
+}
+
 
 // This function will initialize the grid based on the test case chosen
 void fvSim::init(const libconfig::Setting& ranges)
@@ -223,7 +343,7 @@ void fvSim::init(const libconfig::Setting& ranges)
 		}
 		if(i<nCells+1)
 		{
-			f_half[i].resize(nCells);
+			f_half[i].resize(nCells+1);
 		}
 	}
 
@@ -233,36 +353,93 @@ void fvSim::init(const libconfig::Setting& ranges)
 	// Initialize constant run-time variables
 	dx = (x1 - x0) / nCells; 
 	dy = (y1 - y0) / nCells; 
+	std::cout << dx << " " << dy << std::endl;
 
 	int count = ranges.getLength();
+
+	std::vector<std::array<double,4>> states;
+	states.resize(count);
 
 	for(int n=0;n<count;n++)
 	{
 		const libconfig::Setting& range = ranges[n];
-		double xi, xf, rho, u, v, p;
+		double rho, u, v, p;
 
-		if(!(range.lookupValue("xi", xi)
-			&& range.lookupValue("xf", xf)
-			&& range.lookupValue("rho", rho)
+		if(!(      range.lookupValue("rho", rho)
 			&& range.lookupValue("u", u)
 			&& range.lookupValue("v", v)
 			&& range.lookupValue("p", p)))
 			continue;
 
-		for(int i=0;i<nCells;i++)
+		states[n] = {rho, u, v, p};
+
+	}
+
+	for(int i=0;i<nCells;i++)
+	{
+		double x = x0 + (i + 0.5) * dx;
+		xCentroids[i] = x;
+
+		for(int j=0;j<nCells;j++)
 		{
-			for(int j=0;j<nCells;j++)
+			double y = y0 + (j + 0.5) * dy;
+			yCentroids[j] = y;
+
+			switch (m_test) 
 			{
-				double x = x0 + (i + 0.5) * dx;
-				double y = y0 + (j + 0.5) * dy;
-
-				xCentroids[i] = x;
-				yCentroids[j] = y;
-
-				if(x <= xf && x >= xi)
-					Q[i][j] = fvCell({rho, u, v, p}).toCons(gamma);
-
+				case 1 : 
+					{
+						if(x < 0.5 && x >= 0.0)
+							Q[i][j] = fvCell(states[0]).toCons(gamma);
+						else if(x < 1.0 && x >= 0.5)
+							Q[i][j] = fvCell(states[1]).toCons(gamma);
+					}
+					break;
+				case 2 : 
+					{
+						if(y < 0.5 && y >= 0.0)
+							Q[i][j] = fvCell(states[0]).toCons(gamma);
+						else if(y < 1.0 && y >= 0.5)
+							Q[i][j] = fvCell(states[1]).toCons(gamma);
+					}
+					break;
+				case 3 : 
+					{
+						if(x < 0.5 && x >= 0.0)
+							Q[i][j] = fvCell(states[0]).toCons(gamma);
+						else if(x < 1.0 && x >= 0.5)
+							Q[i][j] = fvCell(states[1]).toCons(gamma);
+					}
+					break;
+				case 4 : 
+					{
+						if(y < 0.5 && y >= 0.0)
+							Q[i][j] = fvCell(states[0]).toCons(gamma);
+						else if(y < 1.0 && y >= 0.5)
+							Q[i][j] = fvCell(states[1]).toCons(gamma);
+					}
+					break;
+				case 5 : 
+					{
+						if(x - y < 0.0)
+							Q[i][j] = fvCell(states[0]).toCons(gamma);
+						else if(x - y >= 0.0)
+							Q[i][j] = fvCell(states[1]).toCons(gamma);
+					}
+					break;
+				case 6 : 
+					{
+						double r = sqrt((x-1)*(x-1) + (y-1)*(y-1));
+						if(r <= 0.4)
+							Q[i][j] = fvCell(states[0]).toCons(gamma);
+						else if(r > 0.4)
+							Q[i][j] = fvCell(states[1]).toCons(gamma);
+					}
+					break;
+						
 			}
+					
+
 		}
 	}
 }
@@ -272,268 +449,29 @@ void fvSim::output()
 {
 	for(int i=0;i<nCells;i++)
 	{
-		fvCell Wi = Q[i][nCells/2].toPrim(gamma);
-
-		outputFile << xCentroids[i] << " " 
-			   << yCentroids[nCells/2] << " "
-			   << Wi[0] << " " 
-			   << Wi[1] << " " 
-			   << Wi[2] << " "
-			   << Wi[3] << " "
-			   << Wi.calc_e(gamma)
-			   << std::endl;
-	}
-}
-
-// compute a full time step update with flux values at cell boundaries
-// This is not specific to a certain type of flux, and can therefore be defined
-// using a centred scheme or RP based scheme
-// Uses Q_i_n, Q_i+1_n, f_i+1/2_n and f_i-1/2_n to give Q_i_n+1
-void fvSim::fullTimeStepUpdate()
-{
-	for(int j=0;j<nCells;j++)
-	{
-		for(int i=0;i<nCells;i++)
+		for(int j=0;j<nCells;j++)
 		{
-			Q_new[i][j] = Q_bc[i+m_ghost][j+m_ghost] - (dt / dx) * (f_half[i+1][j] - f_half[i][j]);
+			fvCell Wi = Q[i][j].toPrim(gamma);
+
+			outputFile << xCentroids[i] << " " 
+				   << yCentroids[j] << " "
+				   << Wi[0] << " "
+				   << Wi[1] << " "
+				   << Wi[2] << " "
+				   << Wi[3] << " "
+				   << Wi.calc_e(gamma)
+				   << std::endl;
 		}
+		outputFile << "\n";
 	}
-	Q = Q_new;
-}
-
-// Compute the stable time step based on the grid size and max velocity
-void fvSim::computeTimeStep()
-{
-	// Initialize temp Cell to store primitive form
-	double SL, SR;
-	double max = 0.0;
-
-	for(int j=0;j<nCells;j++)
-	{
-		for(int i=0;i<nCells-1;i++)
-		{
-			waveSpeedEstimates(Q[i][j], Q[i+1][j], SL, SR);
-			SL = fabs(SL);
-			SR = fabs(SR);
-			max = std::max(max, std::max(SL,SR));;
-		}
-	}
-
-	dt = CFL * dx / max;
-}
-
-// The flux function for the PDE in conservation form. In this case it is the
-// Burgers' Flux ---- To be replaced by Euler when ready
-const fvCell fvSim::F(const fvCell& Qi)
-{
-	const fvCell Wi = Qi.toPrim(gamma);
-	
-	double f0 = Wi[0] * Wi[1];
-	double f1 = Wi[0] * Wi[1] * Wi[1] + Wi[3];
-	double f2 = Wi[0] * Wi[1] * Wi[2];
-	double f3 = (Qi[3] + Wi[3]) * Wi[1];
-
-	return fvCell({f0, f1, f2, f3}, true);
-}
-
-// Compute a half time step update of the data in Q_i_n giving Q_i+1/2_n+1/2
-const fvCell fvSim::halfTimeStepUpdate(const fvCell& QL, const fvCell& QR){
-	return 0.5 * (QR + QL) - (0.5 * dt / dx) * (F(QR) - F(QL));
-}
-
-// Lax-Friedrichs Flux calculation, takes left amd right states at cell boundary
-// gives the flux at a cell boundary f_i+1/2_n
-const fvCell fvSim::LF_Flux(const fvCell& QL, const fvCell& QR){
-	return 0.5 * (dx / dt) * (QL - QR) + 0.5 * (F(QR) + F(QL));
-}
-
-// Richtmyer Flux calculation, takes left and right cell boundary values of
-// half-time step updated data and simply calculates the flux function
-const fvCell fvSim::Richt_Flux(const fvCell& Q_half){
-	return F(Q_half);
-}
-
-// FORCE Flux is the average of a LF and Richt Flux. So, we find those at
-// Q_i+1/2_n and then calculate tye flux.
-const fvCell fvSim::FORCE_Flux(const fvCell& QL, const fvCell& QR){
-	const fvCell LF = LF_Flux(QL, QR);
-	const fvCell Q_half = halfTimeStepUpdate(QL, QR);
-	const fvCell Richt = F(Q_half);
-	return 0.5 * (LF + Richt);
-}
-
-const fvCell fvSim::HLL_Flux(const fvCell& QL, const fvCell& QR)
-{
-	double SL, SR;
-	waveSpeedEstimates(QL, QR, SL, SR);
-
-	const fvCell fL = F(QL);                                                        
-	const fvCell fR = F(QR);                                                        
-	const fvCell fHLL = (1.0 / (SR-SL)) * (SR*fL - SL*fR + SL * SR * (QR - QL));
-
-       	if(SL >= 0)
-	{
-		return fL;
-	}else if(SR <= 0)
-	{
-       	        return fR; 
-	}else
-	{
-       	        return fHLL;
-	}
-       	                                                                          
-}                    
-
-const fvCell fvSim::HLLC_Flux(const fvCell& QL, const fvCell& QR)
-{
-	double SL, SR, Sstar;
-	waveSpeedEstimates(QL, QR, SL, SR);
-
-	const fvCell WL = QL.toPrim(gamma);
-	const fvCell WR = QR.toPrim(gamma);
-
-	const double& rhoL  = QL[0],
-		      rhoR  = QR[0],
-		      uL    = WL[1],
-		      uR    = WR[1],
-		      vL    = WL[2],
-		      vR    = WR[2],
-		      pL    = WL[3],
-		      pR    = WR[3],
-		      rhouL = QL[1],
-		      rhouR = QR[1],
-		      EL    = QL[3],
-		      ER    = QR[3];
-
-	Sstar = (pR - pL + rhouL * (SL - uL) - rhouR * (SR - uR)) 
-		/ (rhoL * (SL - uL) - rhoR * (SR - uR));
-
-	double prefixL = rhoL * (SL - uL) / (SL - Sstar);
-	double prefixR = rhoR * (SR - uR) / (SR - Sstar);
-
-	double ELstar = EL / rhoL + (Sstar - uL) * (Sstar + pL / (rhoL * (SL - uL)));
-	double ERstar = ER / rhoR + (Sstar - uR) * (Sstar + pR / (rhoR * (SR - uR)));
-
-	const fvCell QstarL = prefixL * fvCell({1.0, Sstar, vL, ELstar}, true);
-	const fvCell QstarR = prefixR * fvCell({1.0, Sstar, vL, ERstar}, true);
-
-	const fvCell fL = F(QL);                                                        
-	const fvCell fR = F(QR);                                                        
-	const fvCell fstarL = fL + SL * (QstarL - QL);
-	const fvCell fstarR = fR + SR * (QstarR - QR);
-
-       	if(SL >= 0)
-	{
-		return fL; 
-	}else if (SL <= 0.0 && Sstar >= 0.0)
-	{
-       	        return fstarL;
-	}else if (Sstar <= 0.0 && SR >= 0.0)
-	{
-		return fstarR;
-	}else
-	{
-		return fR;
-	}
-}
-
-std::array<fvCell,2> fvSim::constantDataReconstruction(const fvCell& Ql, const fvCell& Qi, const fvCell& QR)
-{
-	std::array<fvCell,2> result;
-
-	result[0] = Qi;
-	result[1] = Qi;
-	
-	return result;
-}
-
-std::array<fvCell,2> fvSim::linearDataReconstruction(const fvCell& QL, const fvCell& Qi, const fvCell& QR){
-	fvCell dL = Qi - QL; 
-	double dL_E = fabs(dL[3]) <= 1.0e-8 ? 1.0e-8 : dL[2];
-	fvCell dR = QR - Qi; 
-	double dR_E = fabs(dR[3]) <= 1.0e-8 ? 1.0e-8 : dR[2];
-
-	double r = dL_E / dR_E;
-
-	double xi = superbee(r);
-
-	fvCell di = 0.5 * (dL + dR);
-
-	std::array<fvCell,2> result;
-	result[0] = Qi - 0.5 * xi * di;
-	result[1] = Qi + 0.5 * xi * di;
-	
-	return result;
-}
-
-double fvSim::superbee(const double& r)
-{
-	if(r<=0)
-		return 0.0;
-	else if(r>0 && r<=0.5)
-		return 2 * r;
-	else if(r>0.5 && r<=1)
-		return 1.0;
-	else{
-		double xiR = 2.0 / (1+r);
-		return std::min(r, std::min(2.0, xiR));
-	}
-}
-
-void fvSim::waveSpeedEstimates(const fvCell& QL, const fvCell& QR, double& SL, double& SR)
-{
-       fvCell WL = QL.toPrim(gamma);                                             
-       fvCell WR = QR.toPrim(gamma);                                             
-
-       double aL  = sqrt(gamma * WL[3] / WL[0]);                                
-       double aR  = sqrt(gamma * WR[3] / WR[0]);                                
-
-       const double& rhoL  = QL[0],
-		     rhoR  = QR[0],
-		     uL    = WL[1],
-		     uR    = WR[1],
-		     vL    = WL[2],
-		     vR    = WR[2],
-		     pL    = WL[3],
-		     pR    = WR[3];
-
-	double rhobar = 0.5 * (rhoL + rhoR);
-	double abar   = 0.5 * (aL + aR);
-	double ppvrs_x  = 0.5 * (pL + pR) - 0.5 * (uR - uL) * rhobar * abar;
-	double ppvrs_y  = 0.5 * (pL + pR) - 0.5 * (vR - vL) * rhobar * abar;
-	double pstar  = std::max(0.0, std::max(ppvrs_x, ppvrs_y));
-
-	double qL, qR;
-
-	//std::cout << "pL " << pL << " pstar " << pstar << " pR " << pR << std::endl; 
-
-	if(pstar <= pL)
-	{
-		qL = 1.0;
-	}
-	else if(pstar > pL)
-	{
-		qL = sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pstar / pL - 1.0));
-	}
-
-	if(pstar <= pR)
-	{
-		qR = 1.0;
-	}
-	else if(pstar > pR)
-	{
-		qR = sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pstar / pR - 1.0));
-	}
-
-	SL = uL - aL * qL;
-	SR = uR + aR * qR;
 }
 
 // Calculate flux is used to parse any chosen flux function in based on user
 // choice or testing, to reduce repetition of code.
-const fvCell fvSim::calculateFlux(const fvCell& QL, const fvCell& QR,
-		std::function<const fvCell(const fvCell&,const fvCell&)> func){
-	return func(QL, QR);
+const fvCell fvSim::calculateFlux(const fvCell& QL, const fvCell& QR, const double& dx,
+		const double& dt, const double& gamma, bool x_dir,
+		std::function<const fvCell(const fvCell&,const fvCell&, const double&, const double&, const double&, bool)> func){
+	return func(QL, QR, dx, dt, gamma, x_dir);
 }
 
 // Reconstruct Data is used to activate linear data reconstruction or not.

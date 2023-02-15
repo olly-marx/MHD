@@ -2,7 +2,7 @@ CC = c++
 CFLAGS = -std=c++17 -Wpedantic -Wall -Wextra -Wshadow -Wnon-virtual-dtor \
 	  -Wold-style-cast -Wcast-align -Wuseless-cast \
 	  -Wdouble-promotion -Wmisleading-indentation \
-	  -Wduplicated-cond -Wformat=2
+	  -Wduplicated-cond -Wformat=2 -O2
 LIBFLAGS = -lconfig++
 DBGFLAGS = -g -O0 -fsanitize=address -fsanitize=bounds -lubsan
 OPTFLAG = -O2
@@ -62,13 +62,22 @@ PHONY += HLLC
 HLLC:
 	$(TARGET) HLLC
 
-PHONY += plot
+PHONY += plotGifs
 FINDDATS = $(wildcard $(DAT)/*.dat)
 RMSUFFIX := $(patsubst %.dat, %, $(FINDDATS))
 RMDIR := $(patsubst ./dat/%, %, $(RMSUFFIX))
-plot:
+plotGifs:
 	for filename in $(RMDIR) ; do \
-		gnuplot -e "filename='$$filename'" ./produceGif.plt ; \
+		gnuplot -e "filename='$$filename'" ./plt/produceGif.plt ; \
+	done
+
+PHONY += plotF
+FINDDATS = $(wildcard $(DAT)/*.dat)
+RMSUFFIX := $(patsubst %.dat, %, $(FINDDATS))
+RMDIR := $(patsubst ./dat/%, %, $(RMSUFFIX))
+plotF:
+	for filename in $(RMDIR) ; do \
+		gnuplot -e "filename='$$filename'" ./plt/plotFinal.plt ; \
 	done
 
 PHONY += clean
