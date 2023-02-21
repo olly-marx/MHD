@@ -3,8 +3,6 @@ set output 'plots/'.filename.'_all.gif'
 
 stats './dat/'.filename.'.dat' nooutput
 
-set xrange [0:1]
-set yrange [0:1]
 set xlabel "x"
 set ylabel "y"
 
