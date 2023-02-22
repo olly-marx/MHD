@@ -32,7 +32,8 @@ class fvSim{
 					const double&, bool)>);
 
 		// Private member variables
-		int             nCells;
+		int             nCellsX;
+		int             nCellsY;
 		int             m_ghost;
 		int             m_test;
 		double          x0;

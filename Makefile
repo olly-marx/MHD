@@ -1,5 +1,5 @@
 CC = c++
-CFLAGS = -std=c++17 -Wpedantic -Wall -Wextra -Wshadow -Wnon-virtual-dtor \
+CFLAGS = -std=c++17 -Wpedantic -Wall -Wextra -Wnon-virtual-dtor \
 	  -Wold-style-cast -Wcast-align -Wuseless-cast \
 	  -Wdouble-promotion -Wmisleading-indentation \
 	  -Wduplicated-cond -Wformat=2 -O2
@@ -78,6 +78,15 @@ RMDIR := $(patsubst ./dat/%, %, $(RMSUFFIX))
 plotF:
 	for filename in $(RMDIR) ; do \
 		gnuplot -e "filename='$$filename'" ./plt/plotFinal.plt ; \
+	done
+
+PHONY += plot1D
+FINDDATS = $(wildcard $(DAT)/*1D.dat)
+RMSUFFIX := $(patsubst %.dat, %, $(FINDDATS))
+RMDIR := $(patsubst ./dat/%, %, $(RMSUFFIX))
+plot1D:
+	for filename in $(RMDIR) ; do \
+		gnuplot -e "filename='$$filename'" ./plt/plotFinal1D.plt ; \
 	done
 
 PHONY += clean

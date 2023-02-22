@@ -90,38 +90,54 @@ double fvCell::operator[](int i) const{
 fvCell fvCell::toPrim(const double& gamma) const{
 	double rho  = valC[0], 
 	       u    = valC[1]/valC[0],
-	       v    = valC[2]/valC[0];
+	       v    = valC[2]/valC[0],
+	       w    = valC[3]/valC[0];
+
 	double e    = calc_e(gamma);
 	double p    = rho * e * (gamma - 1.0);
 
-	return fvCell({rho, u, v, p}, false);
+	double Bx   = valC[5],
+               By   = valC[6],
+	       Bz   = valC[7];
+
+	return fvCell({rho, u, v, w, p, Bx, By, Bz}, false);
 }
 
 fvCell fvCell::toCons(const double& gamma){
-	double rho  = valC[0], 
+	double rho  = valC[0],
 	       u    = valC[1],
-	       v    = valC[2];
-	double kE   = 0.5 * (u*u + v*v); 
-	double e    = calc_e(gamma);
-	double E    = rho * (e + kE);
+	       v    = valC[2],
+	       w    = valC[3],
+	       Bx   = valC[5],
+	       By   = valC[6],
+	       Bz   = valC[7];
 
-	return fvCell({rho, rho*u, rho*v, E}, true);
+	double kE   = 0.5 * (u*u + v*v + w*w);
+	double e    = calc_e(gamma);
+	double kM = 0.5 * (Bx*Bx + By*By + Bz*Bz);
+
+	double E    = rho * (e + kE) + kM;
+
+	return fvCell({rho, rho*u, rho*v, rho*w, E, Bx, By, Bz}, true);
 }
 
 double fvCell::calc_e(const double& gamma) const
 {
 	if(m_isConservative)
 	{
-		return (valC[3] - 0.5 * (valC[1] * valC[1] + valC[2] * valC[2]) / valC[0])
-			/ valC[0];
+		double kE = 0.5 * (valC[1]*valC[1] + valC[2]*valC[2] + valC[3]*valC[3]);
+		double kM = 0.5 * (valC[5]*valC[5] + valC[6]*valC[6] + valC[7]*valC[7]);
+		return (valC[4] - kE/valC[0] - kM) / valC[0];
 	}
 	else 
-		return valC[3] / (valC[0] * (gamma - 1.0));
+		return valC[4] / (valC[0] * (gamma - 1.0));
 }
 
 void fvCell::displayCell() const
 {
-	std::cout << valC[0] << " " << valC[1] << " " << valC[2] << " " << valC[3] << std::endl; 
+	for(int i=0;i<nVars;i++)
+		std::cout << valC[i] << " "; 
+	std::cout << std::endl;
 }
 
 // The following are defined operators for scalar multiplication and are not
@@ -130,7 +146,7 @@ void fvCell::displayCell() const
 
 fvCell operator*(const double s, const fvCell& a)
 {
-	int nVars = 4;
+	int nVars = 8;
 	fvCell result = a;
 
 	for(int i=0;i<nVars;i++)
@@ -141,7 +157,7 @@ fvCell operator*(const double s, const fvCell& a)
 
 fvCell operator*(const fvCell a, const double& s)
 {
-	int nVars = 4;
+	int nVars = 8;
 	fvCell result = a;
 
 	for(int i=0;i<nVars;i++)

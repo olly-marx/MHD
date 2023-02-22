@@ -10,7 +10,7 @@
 
 class fvCell
 {
-	static const int nVars = 4;
+	static const int nVars = 8;
 	public:
 		fvCell(const std::array<double,nVars>&);
 		fvCell(const std::array<double,nVars>&, bool);
