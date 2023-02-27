@@ -24,18 +24,16 @@ const fvCell F(const fvCell& Qi, const double& gamma, bool x_dir)
 
 	double q = x_dir ? u : v;
 	double Bn = x_dir ? Bx : By;
-	std::array<double,3> n = {x_dir ? 1.0 : 0.0, x_dir ? 0.0 : 1.0, 0.0};
+
+	std::array<double,3> n = {(x_dir ? 1.0 : 0.0), (x_dir ? 0.0 : 1.0), 0.0};
 	
 	double f0 = rho * q;
 
-	std::cout << n[0] << " " << n[1] << " " << n[2] <<std::endl;
+	double f1 = rho*q*u + n[0] * (p + 0.5*(Bx*Bx + By*By + Bz*Bz)) - Bn*Bx;
+	double f2 = rho*q*v + n[1] * (p + 0.5*(Bx*Bx + By*By + Bz*Bz)) - Bn*By;
+	double f3 = rho*q*w + n[2] * (p + 0.5*(Bx*Bx + By*By + Bz*Bz)) - Bn*Bz;
 
-	double f1 = rho*q*u + n[0] * (p + 0.5 * (Bx*Bx + By*By + Bz*Bz)) - Bn*Bx;
-	double f2 = rho*q*v + n[1] * (p + 0.5 * (Bx*Bx + By*By + Bz*Bz)) - Bn*By;
-	double f3 = rho*q*w + n[2] * (p + 0.5 * (Bx*Bx + By*By + Bz*Bz)) - Bn*Bz;
-
-	double f4 = (E + p + 0.5 * (Bx*Bx + By*By + Bz*Bz)) * q
-		    - (u*Bx + v*By + w*Bz) * Bn;
+	double f4 = (E + p + 0.5*(Bx*Bx + By*By + Bz*Bz))*q - (u*Bx + v*By + w*Bz)*Bn;
 
 	double f5 = x_dir ?
 		0.0 :
@@ -46,6 +44,15 @@ const fvCell F(const fvCell& Qi, const double& gamma, bool x_dir)
 	double f7 = x_dir ?
 		Bz*u - Bx*w :
 		Bz*v - By*w;
+
+	//std::cout << f0 << " "
+	//	  << f1 << " "
+	//	  << f2 << " "
+	//	  << f3 << " "
+	//	  << f4 << " "
+	//	  << f5 << " "
+	//	  << f6 << " "
+	//	  << f7 << std::endl;
 
 	return fvCell({f0, f1, f2, f3, f4, f5, f6, f7}, true);
 }
@@ -75,28 +82,6 @@ const fvCell FORCE_Flux(const fvCell& QL, const fvCell& QR, const double& dx, co
 	return 0.5 * (LF + Richt);
 }
 
-const fvCell HLL_Flux(const fvCell& QL, const fvCell& QR, const double& dx, const double& dt, const double& gamma, bool x_dir)
-{
-	double SL=0.0, SR=0.0;
-	waveSpeedEstimatesMHD(QL, QR, SL, SR, gamma, x_dir);
-
-	const fvCell fL = F(QL, gamma, x_dir);                                                        
-	const fvCell fR = F(QR, gamma, x_dir);                                                        
-	const fvCell fHLL = (1.0 / (SR-SL)) * (SR*fL - SL*fR + SL * SR * (QR - QL));
-
-       	if(SL >= 0)
-	{
-		return fL;
-	}else if(SR <= 0)
-	{
-       	        return fR; 
-	}else
-	{
-       	        return fHLL;
-	}
-       	                                                                          
-}                    
-
 const fvCell HLLC_Flux(const fvCell& QL, const fvCell& QR, const double& dx, const double& dt, const double& gamma, bool x_dir)
 {
 	double SL=0.0, SR=0.0;
@@ -113,68 +98,76 @@ const fvCell HLLC_Flux(const fvCell& QL, const fvCell& QR, const double& dx, con
 	const fvCell WL = QL.toPrim(gamma);
 	const fvCell WR = QR.toPrim(gamma);
 
-	const double& rhoL  = QL[0],
-		      rhoR  = QR[0],
+	const double& rhoL  = WL[0],
+		      rhoR  = WR[0],
 		      uL    = WL[1],
 		      uR    = WR[1],
 		      vL    = WL[2],
 		      vR    = WR[2],
-		      pL    = WL[4],
-		      pR    = WR[4],
+		      wL    = WL[3],
+		      wR    = WR[3],
+		      EL    = QL[4],
+		      ER    = QR[4],
+		      pLgas = WL[4],
+		      pRgas = WR[4],
 		      BxL   = WL[5],
-		      BxR   = WL[5],
+		      BxR   = WR[5],
 		      ByL   = WL[6],
-		      ByR   = WL[6],
+		      ByR   = WR[6],
 		      BzL   = WL[7],
-		      BzR   = WL[7];
+		      BzR   = WR[7];
+
+	double pL = pLgas + 0.5 * (BxL*BxL + ByL*ByL + BzL*BzL);
+	double pR = pRgas + 0.5 * (BxR*BxR + ByR*ByR + BzR*BzR);
 	
 	const double& qL = x_dir ? uL : vL,
 	              qR = x_dir ? uR : vR;
 	const double& BnL = x_dir ? BxL : ByL,
 	              BnR = x_dir ? BxR : ByR;
 
-	double qstar = (rhoR*qR*(SR - qR) - rhoL*qL*(SL - qL) + pL - pR - BnL*BnL + BnR*BnR) 
-		/ (rhoR*(SR - qR) - rhoL*(SL - qL));
+	double qstar = (rhoR*qR*(SR - qR) - rhoL*qL*(SL - qL) + pL - pR - BnL*BnL + BnR*BnR) / (rhoR*(SR - qR) - rhoL*(SL - qL));
 
-	double BxHLL  = (SR*BxR-SL*BxL) / (SR - SL);
-	double ByHLL  = (SR*ByR-SL*ByL) / (SR - SL);
-	double BzHLL  = (SR*BzR-SL*BzL) / (SR - SL);
+	const fvCell QHLL = (1.0 / (SR - SL)) * (SR*QR - SL*QL - fR + fL);
 
-	double BnStar = (SR*BnR-SL*BnL) / (SR - SL);
+	double BxHLL  = QHLL[5];
+	double ByHLL  = QHLL[6];
+	double BzHLL  = QHLL[7];
 
-	double pstar   = rhoL*(SL - qL)*(qstar - qL) + pL - BnL*BnL + BnStar*BnStar;
+	double BnHLL = x_dir ? BxHLL : ByHLL;
+
+	double pstar   = rhoL*(SL - qL)*(qstar - qL) + pL - BnL*BnL + BnHLL*BnHLL;
 
 	double rho, u, v, w, p, E, Bx, By, Bz, SK, q, Bn;
 	fvCell F, U;
 
-	if(qstar >= 0)
+	if(qstar >= 0.0)
 	{
-		rho  = QL[0],
-		u    = WL[1],
-		v    = WL[2],
-		w    = WL[3],
-		p    = WL[4],
-		E    = QL[3],
-		Bx   = WL[5],
-		By   = WL[6],
-		Bz   = WL[7],
+		rho  = rhoL,
+		u    = uL,
+		v    = vL,
+		w    = wL,
+		p    = pL,
+		E    = EL,
+		Bx   = BxL,
+		By   = ByL,
+		Bz   = BzL,
 		SK   = SL,
 		q    = qL,
 		Bn   = BnL,
 		U    = QL,
 		F    = fL;
 	}
-	else if(qstar < 0)
+	else if(qstar < 0.0)
 	{
-		rho  = QR[0],
-		u    = WR[1],
-		v    = WR[2],
-		w    = WR[3],
-		p    = WR[4],
-		E    = QR[3],
-		Bx   = WR[5],
-		By   = WR[6],
-		Bz   = WR[7],
+		rho  = rhoR,
+		u    = uR,
+		v    = vR,
+		w    = wR,
+		p    = pR,
+		E    = ER,
+		Bx   = BxR,
+		By   = ByR,
+		Bz   = BzR,
 		SK   = SR,
 		q    = qR,
 		Bn   = BnR,
@@ -185,160 +178,93 @@ const fvCell HLLC_Flux(const fvCell& QL, const fvCell& QR, const double& dx, con
 	double rhostar = rho*(SK - q) / (SK - qstar);
 
 	double rhoUstar = x_dir ? 
-			rhostar * qstar :
-			(rho*u)*(SK-q)/(SK-qstar) - (BnStar*BxHLL - Bn*Bx)/(SK-qstar);
+			  rhostar * qstar :
+			  (rho*u)*(SK-q)/(SK-qstar) - (BnHLL*BxHLL - Bn*Bx)/(SK-qstar);
 
 	double rhoVstar = x_dir ? 
-			(rho*v)*(SK-q)/(SK-qstar) - (BnStar*ByHLL - Bn*By)/(SK-qstar) :
-			rhostar * qstar;
+			  (rho*v)*(SK-q)/(SK-qstar) - (BnHLL*ByHLL - Bn*By)/(SK-qstar):
+			  rhostar * qstar;
 	
-	double rhoWstar = (rho*w)*(SK-q)/(SK-qstar) - (BnStar*BzHLL - Bn*Bz)/(SK-qstar);
+	double rhoWstar = (rho*w)*(SK-q)/(SK-qstar) - (BnHLL*BzHLL - Bn*Bz)/(SK-qstar);
 
-	double BdotUStar   = BxHLL*rhoUstar/rhostar + ByHLL*rhoVstar/rhostar + BzHLL*rhoWstar/rhostar;
+	double rhoHLL   = QHLL[0];
+
+	double rhouHLL  = QHLL[1];
+	double rhovHLL  = QHLL[2];
+	double rhowHLL  = QHLL[3];
+
+	double uHLL  = rhouHLL / rhoHLL;
+	double vHLL  = rhovHLL / rhoHLL;
+	double wHLL  = rhowHLL / rhoHLL;
+
+	double BdotUStar   = BxHLL*uHLL + ByHLL*vHLL + BzHLL*wHLL;
 
 	double BdotU   = Bx*u + By*v + Bz*w;
 
-	double Estar    = E*(SK-q)/(SK-qstar) + (pstar*qstar - p*q) - (BnStar*BdotUStar - Bn*BdotU) / (SK - qstar);
+	double Estar    = E*(SK-q)/(SK-qstar) + ((pstar*qstar - p*q) - (BnHLL*BdotUStar - Bn*BdotU)) / (SK - qstar);
 
+	fvCell Ustar = fvCell({rhostar, rhoUstar, rhoVstar, rhoWstar, Estar, BxHLL, ByHLL, BzHLL}, true);
 
-	fvCell Ustar = fvCell({rhostar, rhoUstar/rhostar, rhoVstar/rhostar, rhoWstar/rhostar,
-			Estar, BxHLL, ByHLL, BzHLL}, true);
+	fvCell Fstar = F + SK*(Ustar - U);
 
-	return F + SK*(Ustar - U);
+	return Fstar;
 }
 
-void waveSpeedEstimatesEuler(const fvCell& QL, const fvCell& QR, double& SL, double& SR, const double& gamma, bool x_dir)
+const fvCell HLL_Flux(const fvCell& QL, const fvCell& QR, const double& dx, const double& dt, const double& gamma, bool x_dir)
 {
-       fvCell WL = QL.toPrim(gamma);                                             
-       fvCell WR = QR.toPrim(gamma);                                             
+	double SL=0.0, SR=0.0;
+	waveSpeedEstimatesMHD(QL, QR, SL, SR, gamma, x_dir);
 
-       double aL  = sqrt(gamma * WL[3] / WL[0]);                                
-       double aR  = sqrt(gamma * WR[3] / WR[0]);                                
+	const fvCell fL = F(QL, gamma, x_dir);                                                        
+	const fvCell fR = F(QR, gamma, x_dir);                                                        
 
-       const double& rhoL  = QL[0],
-		     rhoR  = QR[0],
-		     uL    = WL[1],
-		     uR    = WR[1],
-		     vL    = WL[2],
-		     vR    = WR[2],
-		     pL    = WL[3],
-		     pR    = WR[3];
+	const fvCell fHLL = (1.0 / (SR - SL)) * (SR*fR - SL*fL + SL*SR*(QR - QL));
 
-	double L = x_dir ? uL : vL;
-	double R = x_dir ? uR : vR;
-
-	double rhobar = 0.5 * (rhoL + rhoR);
-	double abar   = 0.5 * (aL + aR);
-	double ppvrs  = 0.5 * (pL + pR) - 0.5 * (R - L) * rhobar * abar;
-	double pstar  = std::max(0.0, ppvrs);
-
-	double qL, qR;
-
-	//std::cout << "pL " << pL << " pstar " << pstar << " pR " << pR << std::endl; 
-
-	if(pstar <= pL)
-	{
-		qL = 1.0;
-	}
-	else if(pstar > pL)
-	{
-		qL = sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pstar / pL - 1.0));
-	}
-
-	if(pstar <= pR)
-	{
-		qR = 1.0;
-	}
-	else if(pstar > pR)
-	{
-		qR = sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pstar / pR - 1.0));
-	}
-
-	SL = L - aL * qL;
-	SR = R + aR * qR;
+	if(SL >= 0.0)
+		return fL;
+	else if(SR > 0.0)
+		return fHLL;
+	else 
+		return fR;
 }
 
 void waveSpeedEstimatesMHD(const fvCell& QL, const fvCell& QR, double& SL, double& SR, const double& gamma, bool x_dir)
 {
-       //fvCell WL = QL.toPrim(gamma);                                             
-       //fvCell WR = QR.toPrim(gamma);                                             
-
-       //const double& rhoL  = QL[0],
-       // 	     rhoR  = QR[0],
-       // 	     pL    = WL[4],
-       // 	     pR    = WR[4],
-       // 	     BxL   = WL[5],
-       // 	     BxR   = WR[5],
-       // 	     ByL   = WL[6],
-       // 	     ByR   = WR[6],
-       // 	     BzL   = WL[7],
-       // 	     BzR   = WR[7];
-
-       //double BdotBL = BxL*BxL + ByL*ByL + BzL*BzL;
-       //double BdotBR = BxR*BxR + ByR*ByR + BzR*BzR;
-
-       //double qL = x_dir ? WL[1] : WL[2];
-       //double qR = x_dir ? WR[1] : WR[2];
-
-       //double BnL = x_dir ? WL[5] : WL[6];
-       //double BnR = x_dir ? WR[5] : WR[6];
-
-       //double gammapL = (gamma*pL + BdotBL) / rhoL ;
-       //double gammapR = (gamma*pR + BdotBR) / rhoR ;
-
-       //double cfL = sqrt(0.5*(gammapL + sqrt(gammapL*gammapL - 4.0*gamma*pL*BnL*BnL / (rhoL*rhoL))));
-       //double cfR = sqrt(0.5*(gammapR + sqrt(gammapR*gammapR - 4.0*gamma*pR*BnR*BnR / (rhoR*rhoR))));
-
-       //double cfmax = std::max(cfL, cfR);
-
-       //SL = std::min(qL - cfmax, qR - cfmax);
-       //SR = std::max(qL + cfmax, qR + cfmax);
-
        fvCell WL = QL.toPrim(gamma);                                             
        fvCell WR = QR.toPrim(gamma);                                             
 
-       double aL  = sqrt(gamma * WL[4] / WL[0]);                                
-       double aR  = sqrt(gamma * WR[4] / WR[0]);                                
+       const double& rhoL  = WL[0],
+        	     rhoR  = WR[0],
+        	     pLgas = WL[4],
+        	     pRgas = WR[4],
+        	     BxL   = WL[5],
+        	     BxR   = WR[5],
+        	     ByL   = WL[6],
+        	     ByR   = WR[6],
+        	     BzL   = WL[7],
+        	     BzR   = WR[7];
 
-       const double& rhoL  = QL[0],
-		     rhoR  = QR[0],
-		     uL    = WL[1],
-		     uR    = WR[1],
-		     vL    = WL[2],
-		     vR    = WR[2],
-		     pL    = WL[4],
-		     pR    = WR[4];
+       double pL = pLgas + 0.5 * (BxL*BxL + ByL*ByL + BzL*BzL);
+       double pR = pRgas + 0.5 * (BxR*BxR + ByR*ByR + BzR*BzR);
 
-	double L = x_dir ? uL : vL;
-	double R = x_dir ? uR : vR;
+       double BdotBL = BxL*BxL + ByL*ByL + BzL*BzL;
+       double BdotBR = BxR*BxR + ByR*ByR + BzR*BzR;
 
-	double rhobar = 0.5 * (rhoL + rhoR);
-	double abar   = 0.5 * (aL + aR);
-	double ppvrs  = 0.5 * (pL + pR) - 0.5 * (R - L) * rhobar * abar;
-	double pstar  = std::max(0.0, ppvrs);
+       double qL = x_dir ? WL[1] : WL[2];
+       double qR = x_dir ? WR[1] : WR[2];
 
-	double qL, qR;
+       double BnL = x_dir ? BxL : ByL;
+       double BnR = x_dir ? BxR : ByR;
 
-	//std::cout << "pL " << pL << " pstar " << pstar << " pR " << pR << std::endl; 
+       double GL = (gamma*pL + BdotBL) / rhoL ;
+       double GR = (gamma*pR + BdotBR) / rhoR ;
 
-	if(pstar <= pL)
-	{
-		qL = 1.0;
-	}
-	else if(pstar > pL)
-	{
-		qL = sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pstar / pL - 1.0));
-	}
+       double cfL = sqrt(0.5*(GL + sqrt(GL*GL - 4.0*gamma*pL*BnL*BnL / (rhoL*rhoL))));
+       double cfR = sqrt(0.5*(GR + sqrt(GR*GR - 4.0*gamma*pR*BnR*BnR / (rhoR*rhoR))));
 
-	if(pstar <= pR)
-	{
-		qR = 1.0;
-	}
-	else if(pstar > pR)
-	{
-		qR = sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pstar / pR - 1.0));
-	}
+       double SWL = fabs(qL + cfL);
+       double SWR = fabs(qR + cfR);
 
-	SL = L - aL * qL;
-	SR = R + aR * qR;
+       SR = std::max(SWL, SWR);
+       SL = -SR;
 }

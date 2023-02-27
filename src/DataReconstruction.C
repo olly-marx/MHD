@@ -45,9 +45,9 @@ double minbee(const double& r)
 
 std::array<fvCell,2> linearDataReconstruction(const fvCell& QL, const fvCell& Qi, const fvCell& QR){
 	fvCell dL = Qi - QL; 
-	double dL_E = (fabs(dL[3]) <= 1.0e-8) ? 1.0e-8 : dL[3];
+	double dL_E = (fabs(dL[4]) <= 1.0e-8) ? 1.0e-8 : dL[4];
 	fvCell dR = QR - Qi; 
-	double dR_E = (fabs(dR[3]) <= 1.0e-8) ? 1.0e-8 : dR[3];
+	double dR_E = (fabs(dR[4]) <= 1.0e-8) ? 1.0e-8 : dR[4];
 
 	double r = dL_E / dR_E;
 

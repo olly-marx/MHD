@@ -11,9 +11,8 @@ const fvCell halfTimeStepUpdate(const fvCell& QL, const fvCell& QR, const double
 const fvCell F(const fvCell&, const double&, bool);
 const fvCell LF_Flux(const fvCell& QL, const fvCell& QR, const double& dx, const double& dt, const double& gamma, bool x_dir);
 const fvCell FORCE_Flux(const fvCell& QL, const fvCell& QR, const double& dx, const double& dt, const double& gamma, bool x_dir);
-const fvCell HLL_Flux(const fvCell& QL, const fvCell& QR, const double& dx, const double& dt, const double& gamma, bool x_dir);
 const fvCell HLLC_Flux(const fvCell& QL, const fvCell& QR, const double& dx, const double& dt, const double& gamma, bool x_dir);
-void waveSpeedEstimatesEuler(const fvCell&, const fvCell&, double&, double&, const double&, bool);
+const fvCell HLL_Flux(const fvCell& QL, const fvCell& QR, const double& dx, const double& dt, const double& gamma, bool x_dir);
 void waveSpeedEstimatesMHD(const fvCell&, const fvCell&, double&, double&, const double&, bool);
 
 #endif

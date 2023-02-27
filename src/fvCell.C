@@ -91,14 +91,17 @@ fvCell fvCell::toPrim(const double& gamma) const{
 	double rho  = valC[0], 
 	       u    = valC[1]/valC[0],
 	       v    = valC[2]/valC[0],
-	       w    = valC[3]/valC[0];
-
-	double e    = calc_e(gamma);
-	double p    = rho * e * (gamma - 1.0);
+	       w    = valC[3]/valC[0],
+	       E    = valC[4];
 
 	double Bx   = valC[5],
                By   = valC[6],
 	       Bz   = valC[7];
+
+	double kE   = 0.5*rho*(u*u + v*v + w*w);
+	double mE   = 0.5*(Bx*Bx + By*By + Bz*Bz);
+
+	double p    = (gamma - 1.0) * (E - kE - mE);
 
 	return fvCell({rho, u, v, w, p, Bx, By, Bz}, false);
 }
@@ -108,29 +111,18 @@ fvCell fvCell::toCons(const double& gamma){
 	       u    = valC[1],
 	       v    = valC[2],
 	       w    = valC[3],
+	       p    = valC[4],
 	       Bx   = valC[5],
 	       By   = valC[6],
 	       Bz   = valC[7];
 
-	double kE   = 0.5 * (u*u + v*v + w*w);
-	double e    = calc_e(gamma);
-	double kM = 0.5 * (Bx*Bx + By*By + Bz*Bz);
+	double kE   = 0.5*rho*(u*u + v*v + w*w);
+	double mE   = 0.5 * (Bx*Bx + By*By + Bz*Bz);
+	double e    = p / (gamma - 1.0);
 
-	double E    = rho * (e + kE) + kM;
+	double E    = e + kE + mE;
 
 	return fvCell({rho, rho*u, rho*v, rho*w, E, Bx, By, Bz}, true);
-}
-
-double fvCell::calc_e(const double& gamma) const
-{
-	if(m_isConservative)
-	{
-		double kE = 0.5 * (valC[1]*valC[1] + valC[2]*valC[2] + valC[3]*valC[3]);
-		double kM = 0.5 * (valC[5]*valC[5] + valC[6]*valC[6] + valC[7]*valC[7]);
-		return (valC[4] - kE/valC[0] - kM) / valC[0];
-	}
-	else 
-		return valC[4] / (valC[0] * (gamma - 1.0));
 }
 
 void fvCell::displayCell() const

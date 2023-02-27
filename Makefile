@@ -71,6 +71,15 @@ plotGifs:
 		gnuplot -e "filename='$$filename'" ./plt/produceGif.plt ; \
 	done
 
+PHONY += plotGifs1D
+FINDDATS = $(wildcard $(DAT)/*1D.dat)
+RMSUFFIX := $(patsubst %.dat, %, $(FINDDATS))
+RMDIR := $(patsubst ./dat/%, %, $(RMSUFFIX))
+plotGifs1D:
+	for filename in $(RMDIR) ; do \
+		gnuplot -e "filename='$$filename'" ./plt/produceGif1D.plt ; \
+	done
+
 PHONY += plotF
 FINDDATS = $(wildcard $(DAT)/*.dat)
 RMSUFFIX := $(patsubst %.dat, %, $(FINDDATS))
@@ -97,6 +106,7 @@ clean:
 PHONY += cleanresults
 cleanresults:
 	rm $(DAT)/*.dat
-	rm *.gif
+	rm plots/*.gif
+	rm plots/*.png
 
 .PHONY: $(PHONY)

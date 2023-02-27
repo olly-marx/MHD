@@ -24,7 +24,6 @@ class fvCell
 		bool    operator==(const fvCell&) const;
 		fvCell  toPrim(const double&) const;
 		fvCell  toCons(const double&);
-		double calc_e(const double&) const;
 		void displayCell() const;
 	private:
 		// Private member variables

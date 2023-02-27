@@ -118,11 +118,6 @@ void fvSim::run(){
 		f = FORCE_Flux;
 		g = constantDataReconstruction;
 	}
-	else if(m_solver == "HLL")
-	{
-		f = HLL_Flux;
-		g = constantDataReconstruction;
-	}
 	else if(m_solver == "SLIC")
 	{
 		f = FORCE_Flux;
@@ -133,15 +128,27 @@ void fvSim::run(){
 		f = HLLC_Flux;
 		g = linearDataReconstruction;
 	}
+	else if(m_solver == "HLL")
+	{
+		f = HLL_Flux;
+		g = linearDataReconstruction;
+	}
 
 	double printNumber = 1.0;
 	bool printedAtTime = false;
 	double nPrints = 10.0;
 	double fracGap = 1.0/nPrints;
 	t = t0;
+
+	double CFLTemp = CFL;
+	CFL = 0.2;
+	int slowStart = 0;
 	do
 	{
 		std::cout << "+" << std::flush;
+		if(slowStart++ >= 5)
+			CFL = CFLTemp;
+
 		computeTimeStep();
 		t = t + dt;
 		std::cout << "dt " << dt << std::endl;
@@ -267,16 +274,13 @@ void fvSim::run(){
 			output();
 
 			printedAtTime = true;
-			std::cout << "#" << printNumber << std::flush;
+			std::cout << "#" << printNumber << std::endl;
 		}
 		else if(printedAtTime && tFrac > printNumber * fracGap)
 		{
 			printNumber+=1.0;
 			printedAtTime = false;
 		}
-		outputFile << "\n\n";
-		outputFile << "t=" << t << "\n";
-		output();
 
 	} while (t < t1);
 
@@ -336,7 +340,7 @@ void fvSim::computeTimeStep()
 	//	}
 	//}
 
-	dt = std::min(CFL * std::min(dx, dy) / max, t1 - t);
+	dt = std::min(CFL * dx / max, t1 - t);
 }
 
 
@@ -396,6 +400,19 @@ void fvSim::init(const libconfig::Setting& ranges)
 
 		states[n] = {rho, u, v, w, p, Bx, By, Bz};
 
+	}
+
+	if(m_test==3 || m_test==5)
+	{
+		double norm = sqrt(4.0*M_PI);
+
+		states[0][5] = states[0][5] / norm;
+		states[0][6] = states[0][6] / norm;
+		states[0][7] = states[0][7] / norm;
+
+		states[1][5] = states[1][5] / norm;
+		states[1][6] = states[1][6] / norm;
+		states[1][7] = states[1][7] / norm;
 	}
 
 	for(int i=0;i<nCellsX;i++)
@@ -472,11 +489,12 @@ void fvSim::output()
 				   << Wi[1] << " "
 				   << Wi[2] << " "
 				   << Wi[3] << " "
-				   << Wi[4] << " "
+				   << (Wi[4] + 0.5*(Wi[5]*Wi[5]+Wi[6]*Wi[6]+Wi[7]*Wi[7])) << " "
 				   << Wi[5] << " "
 				   << Wi[6] << " "
 				   << Wi[7] << " "
-				   << Wi.calc_e(gamma)
+				   << Wi[4] / (Wi[0]*(gamma-1.0)) << " "
+				   << Q[i][j][4]
 				   << std::endl;
 		}
 		//outputFile << "\n";
