@@ -42,6 +42,14 @@ refactor:
 	CFLAGS += $(REFFLAGS)
 	$(TARGET)
 
+PHONY += runall
+runall:
+	$(TARGET) HLLC 1
+
+PHONY += plotall
+plotall:
+	gnuplot ./plt/plotAllMHDTests.plt
+
 PHONY += LF
 LF:
 	$(TARGET) LF

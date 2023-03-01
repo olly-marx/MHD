@@ -45,15 +45,6 @@ const fvCell F(const fvCell& Qi, const double& gamma, bool x_dir)
 		Bz*u - Bx*w :
 		Bz*v - By*w;
 
-	//std::cout << f0 << " "
-	//	  << f1 << " "
-	//	  << f2 << " "
-	//	  << f3 << " "
-	//	  << f4 << " "
-	//	  << f5 << " "
-	//	  << f6 << " "
-	//	  << f7 << std::endl;
-
 	return fvCell({f0, f1, f2, f3, f4, f5, f6, f7}, true);
 }
 

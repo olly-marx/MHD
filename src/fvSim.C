@@ -7,6 +7,7 @@
 #include <fstream>
 #include <cstddef>
 #include <iterator>
+#include <math.h>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -24,9 +25,9 @@
 
 // Constructor, will take in settings file and test number to construct full sim
 // with initial conditions and configs for certain tests
-fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
+fvSim::fvSim(const char* configFileName, int testNum, std::string solver)
+{
 	m_solver = solver;
-	gamma = 1.4;
 	m_ghost = 2;
 
 	libconfig::Config cfg;
@@ -58,14 +59,15 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 			&& test.lookupValue("t0", t0)
 			&& test.lookupValue("t1", t1)
 			&& test.lookupValue("CFL", CFL)
-			&& test.lookupValue("test", m_test)
+			&& test.lookupValue("test", m_testName)
 			&& test.lookupValue("gamma", gamma)))
 			std::cout << "Settings for test #" << testNum+1 << " read in."
 				<< std::endl;
 
+		m_test = testNum+1;
 
 		const libconfig::Setting& range = tests[testNum]["inits"];
-		std::cout << "Solv: " << m_solver << " Test: " << (testNum+1) 
+		std::cout << "Solv: " << m_solver << " Test: " << m_testName 
 			<< " nCellsX " << nCellsX 
 			<< " nCellsY " << nCellsY 
 			<< " x0 " << x0 
@@ -75,11 +77,12 @@ fvSim::fvSim(const char* configFileName, int testNum, std::string solver){
 			<< " t0 " << t0 
 			<< " t1 " << t1 
 			<< " CFL " << CFL 
+			<< " gamma " << gamma
+			<< " test " << m_test 
 			<< std::endl;
 
 		// Create output file name and convert to char*
-		std::string s = "/home/ojm40/Documents/MPhil_MHD/dat/output_" 
-			+ m_solver + "_test" + std::to_string(testNum+1) + "_1D.dat";
+		std::string s = "/home/ojm40/Documents/MPhil_MHD/dat/output_" + m_testName + ".dat";
 		const char* outputFileName = s.c_str();
 
 		outputFile.open(outputFileName);
@@ -138,49 +141,28 @@ void fvSim::run(){
 	bool printedAtTime = false;
 	double nPrints = 10.0;
 	double fracGap = 1.0/nPrints;
+
 	t = t0;
 
-	double CFLTemp = CFL;
-	CFL = 0.2;
-	int slowStart = 0;
 	do
 	{
-		std::cout << "+" << std::flush;
-		if(slowStart++ >= 5)
-			CFL = CFLTemp;
-
 		computeTimeStep();
 		t = t + dt;
+		std::cout << "+" << std::flush;
 		std::cout << "dt " << dt << std::endl;
 
-		// Copy the actual domain into the ghost cell domain
-		for(int i=0;i<nCellsX;i++)
-		{
-			for(int j=0;j<nCellsY;j++)
-			{
-				Q_bc[i+m_ghost][j+m_ghost] = Q[i][j];
-			}
-		}
+		bool x_dir = true;
 
-		// Do boundary conditions here 
-		// Transmissive
-		//
+		// Copy the actual domain into the ghost cell domain
+		copyDomain();
+
 		// LENGTHS
-		for(int i=0;i<m_ghost;i++)
-		{
-			for(int j=0;j<nCellsY;j++)
-			{
-				Q_bc[i][j+m_ghost] = Q[0][j];
-				Q_bc[i + m_ghost + nCellsX][j + m_ghost] = Q[nCellsX-1][j];
-			}
-		}
+		setBoundaryConditions(x_dir);
 
 		// Qi stores left and right states
 		// Initially just for the x direction reconstruction and flux
 		// calculations
 		std::array<fvCell,2> Qi;
-
-		bool x_dir = true;
 
 		for(int j=0;j<nCellsY;j++)
 		{
@@ -212,56 +194,45 @@ void fvSim::run(){
 		
 		fullTimeStepUpdate(x_dir);
 
-		//x_dir = false;
+/************************************** y-dir ************************************/
 
-		//// Copy the actual domain into the ghost cell domain
-		//for(int i=0;i<nCells;i++)
-		//{
-		//	for(int j=0;j<nCells;j++)
-		//	{
-		//		Q_bc[i+m_ghost][j+m_ghost] = Q[i][j];
-		//	}
-		//}
+		x_dir = false;
 
-		//// BREADTHS
-		//for(int i=0;i<nCells;i++)
-		//{
-		//	for(int j=0;j<m_ghost;j++)
-		//	{
-		//		Q_bc[i+m_ghost][j] = Q[i][0];
-		//		Q_bc[i + m_ghost][j + m_ghost + nCells] = Q[i][nCells-1];
-		//	}
-		//}
+		// Copy the actual domain into the ghost cell domain
+		copyDomain();
 
-		//for(int i=0;i<nCells;i++)
-		//{
-		//	std::array<fvCell,2> Qiplus1 = reconstructData(Q_bc[i+m_ghost][0],
-		//						       Q_bc[i+m_ghost][1], 
-		//						       Q_bc[i+m_ghost][2],
-		//						       g );
-		//		
-		//	for(int j=1;j<nCells+m_ghost;j++)
-		//	{
+		// BREADTHS
+		setBoundaryConditions(x_dir);
 
-		//		Qi = Qiplus1;
+		for(int i=0;i<nCellsX;i++)
+		{
+			std::array<fvCell,2> Qiplus1 = reconstructData(Q_bc[i+m_ghost][0],
+								       Q_bc[i+m_ghost][1], 
+								       Q_bc[i+m_ghost][2],
+								       g );
+				
+			for(int j=1;j<nCellsY+m_ghost;j++)
+			{
 
-		//		Qiplus1 = reconstructData(Q_bc[i+m_ghost][j],
-		//				          Q_bc[i+m_ghost][j+1],
-		//					  Q_bc[i+m_ghost][j+2], 
-		//					  g);
+				Qi = Qiplus1;
 
-		//		const fvCell dFL = (F(Qi[1], gamma, x_dir) - F(Qi[0], gamma, x_dir));
-		//		const fvCell dFR = (F(Qiplus1[1], gamma, x_dir) - F(Qiplus1[0], gamma, x_dir));
+				Qiplus1 = reconstructData(Q_bc[i+m_ghost][j],
+						          Q_bc[i+m_ghost][j+1],
+							  Q_bc[i+m_ghost][j+2], 
+							  g);
 
-		//		const fvCell QL = Qi[1] - (0.5 * dt / dx) * dFL;
-		//		const fvCell QR = Qiplus1[0] - (0.5 * dt / dx) * dFR;
+				const fvCell dFL = (F(Qi[1], gamma, x_dir) - F(Qi[0], gamma, x_dir));
+				const fvCell dFR = (F(Qiplus1[1], gamma, x_dir) - F(Qiplus1[0], gamma, x_dir));
 
-		//		f_half[i][j-1] = calculateFlux(QL, QR, dx, dt, gamma, x_dir, f);
+				const fvCell QL = Qi[1] - (0.5 * dt / dx) * dFL;
+				const fvCell QR = Qiplus1[0] - (0.5 * dt / dx) * dFR;
 
-		//	}
-		//}
-		//
-		//fullTimeStepUpdate(x_dir);
+				f_half[i][j-1] = calculateFlux(QL, QR, dx, dt, gamma, x_dir, f);
+
+			}
+		}
+		
+		fullTimeStepUpdate(x_dir);
 
 		double tFrac = t/t1;
 		double scale = pow(10.0, ceil(log10(fabs(tFrac))) + 2);
@@ -269,12 +240,12 @@ void fvSim::run(){
 
 		if(tFrac >= printNumber * fracGap && !printedAtTime)
 		{
-			outputFile << "\n\n";
-			outputFile << "t=" << t << "\n";
-			output();
+			//outputFile << "\n\n";
+			//outputFile << "t=" << t << "\n";
+			//output();
 
 			printedAtTime = true;
-			std::cout << "#" << printNumber << std::endl;
+			std::cout << printNumber*10 << "%" << std::endl;
 		}
 		else if(printedAtTime && tFrac > printNumber * fracGap)
 		{
@@ -285,7 +256,6 @@ void fvSim::run(){
 	} while (t < t1);
 
 	outputFile << "\n\n";
-	outputFile << "t=" << t << "\n";
 	output();
 	
 	std::cout << "#Fin" << std::flush;
@@ -318,27 +288,33 @@ void fvSim::computeTimeStep()
 	double SL, SR;
 	double max = 0.0;
 
-	for(int j=0;j<nCellsY;j++)
+	if(nCellsX>1)
 	{
-		for(int i=0;i<nCellsX-1;i++)
+		for(int j=0;j<nCellsY;j++)
 		{
-			waveSpeedEstimatesMHD(Q[i][j], Q[i+1][j], SL, SR, gamma, true);
-			SL = fabs(SL);
-			SR = fabs(SR);
-			max = std::max(max, std::max(SL,SR));;
+			for(int i=0;i<nCellsX-1;i++)
+			{
+				waveSpeedEstimatesMHD(Q[i][j], Q[i+1][j], SL, SR, gamma, true);
+				SL = fabs(SL);
+				SR = fabs(SR);
+				max = std::max(max, std::max(SL,SR));;
+			}
 		}
 	}
 
-	//for(int i=0;i<nCellsX;i++)
-	//{
-	//	for(int j=0;j<nCellsY-1;j++)
-	//	{
-	//		waveSpeedEstimatesMHD(Q[i][j], Q[i][j+1], SL, SR, gamma, false);
-	//		SL = fabs(SL);
-	//		SR = fabs(SR);
-	//		max = std::max(max, std::max(SL,SR));;
-	//	}
-	//}
+	if(nCellsY>1)
+	{
+		for(int i=0;i<nCellsX;i++)
+		{
+			for(int j=0;j<nCellsY-1;j++)
+			{
+				waveSpeedEstimatesMHD(Q[i][j], Q[i][j+1], SL, SR, gamma, false);
+				SL = fabs(SL);
+				SR = fabs(SR);
+				max = std::max(max, std::max(SL,SR));;
+			}
+		}
+	}
 
 	dt = std::min(CFL * dx / max, t1 - t);
 }
@@ -376,7 +352,7 @@ void fvSim::init(const libconfig::Setting& ranges)
 	// Initialize constant run-time variables
 	dx = (x1 - x0) / nCellsX; 
 	dy = (y1 - y0) / nCellsY; 
-	std::cout << dx << " " << dy << std::endl;
+	std::cout << "dx = " << dx << " dy = " << dy << std::endl;
 
 	int count = ranges.getLength();
 
@@ -402,19 +378,6 @@ void fvSim::init(const libconfig::Setting& ranges)
 
 	}
 
-	if(m_test==3 || m_test==5)
-	{
-		double norm = sqrt(4.0*M_PI);
-
-		states[0][5] = states[0][5] / norm;
-		states[0][6] = states[0][6] / norm;
-		states[0][7] = states[0][7] / norm;
-
-		states[1][5] = states[1][5] / norm;
-		states[1][6] = states[1][6] / norm;
-		states[1][7] = states[1][7] / norm;
-	}
-
 	for(int i=0;i<nCellsX;i++)
 	{
 		double x = x0 + (i + 0.5) * dx;
@@ -427,46 +390,96 @@ void fvSim::init(const libconfig::Setting& ranges)
 
 			switch (m_test) 
 			{
-				case 1 : 
-					{
-						if(x < (x1-x0)/2 && x >= x0)
-							Q[i][j] = fvCell(states[0]).toCons(gamma);
-						else if(x < x1 && x >= (x1-x0)/2)
-							Q[i][j] = fvCell(states[1]).toCons(gamma);
-					}
+				// discontinuity halfway along x-axis
+				case 1: case 2: case 6:
+				{
+					if(x < (x1-x0)/2 && x >= x0)
+						Q[i][j] = fvCell(states[0]).toCons(gamma);
+					else if(x < x1 && x >= (x1-x0)/2)
+						Q[i][j] = fvCell(states[1]).toCons(gamma);
 					break;
-				case 2 : 
-					{
-						if(x < (x1-x0)/2 && x >= x0)
-							Q[i][j] = fvCell(states[0]).toCons(gamma);
-						else if(x < x1 && x >= (x1-x0)/2)
-							Q[i][j] = fvCell(states[1]).toCons(gamma);
-					}
+				}
+				// discontinuity halfway along y-axis
+				case 3 : case 7:
+				{
+					if(y < (y1-y0)/2 && y >= x0)
+						Q[i][j] = fvCell(states[0]).toCons(gamma);
+					else if(y < y1 && y >= (y1-y0)/2)
+						Q[i][j] = fvCell(states[1]).toCons(gamma);
 					break;
-				case 3 : 
-					{
-						if(x < (x1-x0)/2 && x >= x0)
-							Q[i][j] = fvCell(states[0]).toCons(gamma);
-						else if(x < x1 && x >= (x1-x0)/2)
-							Q[i][j] = fvCell(states[1]).toCons(gamma);
-					}
+				}
+				// discontinuity halfway along y=1-x
+				case 4 :
+				{
+					if((y1-x) >= y)
+						Q[i][j] = fvCell(states[0]).toCons(gamma);
+					else if((y1-x) < y)
+						Q[i][j] = fvCell(states[1]).toCons(gamma);
 					break;
-				case 4 : 
-					{
-						if(x < (x1-x0)/2 && x >= x0)
-							Q[i][j] = fvCell(states[0]).toCons(gamma);
-						else if(x < x1 && x >= (x1-x0)/2)
-							Q[i][j] = fvCell(states[1]).toCons(gamma);
-					}
-					break;
+				}
+				// circular discontinuity at radial distance
+				// r=0.4
 				case 5 : 
-					{
-						if(x < (x1-x0)/2 && x >= x0)
-							Q[i][j] = fvCell(states[0]).toCons(gamma);
-						else if(x < x1 && x >= (x1-x0)/2)
-							Q[i][j] = fvCell(states[1]).toCons(gamma);
-					}
+				{
+					double r = sqrt(x*x + y*y);
+					if(r <= 0.4)
+						Q[i][j] = fvCell(states[0]).toCons(gamma);
+					else
+						Q[i][j] = fvCell(states[1]).toCons(gamma);
 					break;
+				}
+				// diagonal Brio and Wu test
+				case 8 :
+				{
+					double ang = cos(M_PI/4);
+
+					states[0][5] = -ang + 0.75*ang;
+					states[0][6] = ang + 0.75*ang;
+
+					states[1][5] = ang + 0.75*ang;
+					states[1][6] = -ang + 0.75*ang;
+
+					if((y1-x) >= y)
+						Q[i][j] = fvCell(states[0]).toCons(gamma);
+					else if((y1-x) < y)
+						Q[i][j] = fvCell(states[1]).toCons(gamma);
+					break;
+				}
+				// Orszag-Tang vortex
+				case 9 :
+				{
+					states[0][0] = gamma*gamma;
+					states[0][1] = -sin(2*M_PI*y);
+					states[0][2] = sin(2*M_PI*x);
+					states[0][3] = 0.0;
+					states[0][4] = gamma;
+					states[0][5] = -sin(2*M_PI*y);
+					states[0][6] = sin(4*M_PI*x);
+					states[0][7] = 0.0;
+
+					Q[i][j] = fvCell(states[0]).toCons(gamma);
+					break;
+				}
+				// Kelvin-Helmholtz Instability
+				case 10 :
+				{
+					double theta = M_PI/3;
+					double M     = 1.0;
+					double ca    = 0.1;
+					double sigma = 0.1;
+
+					states[0][0] = 1.0;
+					states[0][1] = M/(2*tanh(20*y));
+					states[0][2] = 0.1*sin(2*M_PI*x)*exp(-y*y/(theta*theta));
+					states[0][3] = 0.0;
+					states[0][4] = 1/gamma;
+					states[0][5] = ca*sqrt(1.0)*cos(theta);
+					states[0][6] = 0.0;
+					states[0][7] = ca*sqrt(1.0)*sin(theta);
+
+					Q[i][j] = fvCell(states[0]).toCons(gamma);
+					break;
+				}
 			}
 					
 
@@ -474,31 +487,265 @@ void fvSim::init(const libconfig::Setting& ranges)
 	}
 }
 
-// Utility to output to a ofstream when needed
-void fvSim::output()
+void fvSim::copyDomain()
 {
 	for(int i=0;i<nCellsX;i++)
 	{
 		for(int j=0;j<nCellsY;j++)
 		{
-			fvCell Wi = Q[i][j].toPrim(gamma);
-
-			outputFile << xCentroids[i] << " " 
-				   << yCentroids[j] << " "
-				   << Wi[0] << " "
-				   << Wi[1] << " "
-				   << Wi[2] << " "
-				   << Wi[3] << " "
-				   << (Wi[4] + 0.5*(Wi[5]*Wi[5]+Wi[6]*Wi[6]+Wi[7]*Wi[7])) << " "
-				   << Wi[5] << " "
-				   << Wi[6] << " "
-				   << Wi[7] << " "
-				   << Wi[4] / (Wi[0]*(gamma-1.0)) << " "
-				   << Q[i][j][4]
-				   << std::endl;
+			Q_bc[i+m_ghost][j+m_ghost] = Q[i][j];
 		}
-		//outputFile << "\n";
 	}
+}
+
+void fvSim::setBoundaryConditions(bool x_dir)
+{
+	switch (m_test)
+	{
+		case 1 : case 2: case 3 : case 4 : case 5 : case 6 : case 7 : case 8 :
+		{
+			if(x_dir)
+			{
+				// LENGTHS
+				for(int i=0;i<m_ghost;i++)
+				{
+					for(int j=0;j<nCellsY;j++)
+					{
+						Q_bc[i][j+m_ghost] = Q[0][j];
+						Q_bc[i + m_ghost + nCellsX][j + m_ghost] = Q[nCellsX-1][j];
+					}
+				}
+			}
+			else {
+				// BREADTHS
+				for(int i=0;i<nCellsX;i++)
+				{
+					for(int j=0;j<m_ghost;j++)
+					{
+						Q_bc[i+m_ghost][j] = Q[i][0];
+						Q_bc[i + m_ghost][j + m_ghost + nCellsY] = Q[i][nCellsY-1];
+					}
+				}
+			}
+			break;
+		}
+		case 9 :
+		{
+			if(x_dir)
+			{
+				// LENGTHS
+				for(int i=0;i<m_ghost;i++)
+				{
+					for(int j=0;j<nCellsY;j++)
+					{
+						Q_bc[i][j+m_ghost] = Q[nCellsX-1][j];
+						Q_bc[i + m_ghost + nCellsX][j + m_ghost] = Q[0][j];
+					}
+				}
+			}
+			else {
+				// BREADTHS
+				for(int i=0;i<nCellsX;i++)
+				{
+					for(int j=0;j<m_ghost;j++)
+					{
+						Q_bc[i+m_ghost][j] = Q[i][nCellsY-1];
+						Q_bc[i + m_ghost][j + m_ghost + nCellsY] = Q[i][0];
+					}
+				}
+			}
+			break;
+		}
+	}
+	
+}
+
+// Utility to output to a ofstream when needed
+void fvSim::output()
+{
+	switch (m_test)
+	{
+		// Brio & Wu 1D test -- Print along x-axis, j=0
+		case 1 : 
+		{
+			for(int i=0;i<nCellsX;i++)
+			{
+				fvCell Wi = Q[i][0].toPrim(gamma);
+
+				outputFile << xCentroids[i] << " " 
+					   << yCentroids[0] << " "
+					   << Wi[0] << " "
+					   << Wi[1] << " "
+					   << Wi[2] << " "
+					   << Wi[3] << " "
+					   //<< Wi[4] << " "
+					   << (Wi[4] + 0.5*(Wi[5]*Wi[5]+Wi[6]*Wi[6]+Wi[7]*Wi[7])) << " "
+					   << Wi[5] << " "
+					   << Wi[6] << " "
+					   << Wi[7] << " "
+					   << Wi[4] / (Wi[0]*(gamma-1.0)) << " "
+					   << Q[i][0][4]
+					   << std::endl;
+			}
+			break;
+		}
+		// Sod 2D test with x discontinuity -- Print along y=y1-y0/2
+		case 2 : case 6 :
+		{
+			for(int i=0;i<nCellsX;i++)
+			{
+				fvCell Wi = Q[i][nCellsY/2].toPrim(gamma);
+
+				outputFile << xCentroids[i] << " " 
+					   << yCentroids[nCellsY/2] << " "
+					   << Wi[0] << " "
+					   << Wi[1] << " "
+					   << Wi[2] << " "
+					   << Wi[3] << " "
+					   << (Wi[4] + 0.5*(Wi[5]*Wi[5]+Wi[6]*Wi[6]+Wi[7]*Wi[7])) << " "
+					   << Wi[5] << " "
+					   << Wi[6] << " "
+					   << Wi[7] << " "
+					   << Wi[4] / (Wi[0]*(gamma-1.0)) << " "
+					   << Q[i][nCellsY/2][4]
+					   << std::endl;
+			}
+			break;
+		}
+		// Sod 2D test with x discontinuity -- Print along x=x1-x0/2
+		case 3 : case 7 :
+		{
+			for(int j=0;j<nCellsY;j++)
+			{
+				fvCell Wi = Q[nCellsX/2][j].toPrim(gamma);
+
+				outputFile << xCentroids[nCellsX/2] << " " 
+					   << yCentroids[j] << " "
+					   << Wi[0] << " "
+					   << Wi[1] << " "
+					   << Wi[2] << " "
+					   << Wi[3] << " "
+					   << (Wi[4] + 0.5*(Wi[5]*Wi[5]+Wi[6]*Wi[6]+Wi[7]*Wi[7])) << " "
+					   << Wi[5] << " "
+					   << Wi[6] << " "
+					   << Wi[7] << " "
+					   << Wi[4] / (Wi[0]*(gamma-1.0)) << " "
+					   << Q[nCellsX/2][j][4]
+					   << std::endl;
+			}
+			break;
+		}
+		// Sod 2D test with x=-y -- Print along x=y
+		case 4 : case 8 :
+		{
+			for(int i=0;i<nCellsX;i++)
+			{
+				fvCell Wi = Q[i][i].toPrim(gamma);
+
+				outputFile << xCentroids[i] << " " 
+					   << yCentroids[i] << " "
+					   << Wi[0] << " "
+					   << Wi[1] << " "
+					   << Wi[2] << " "
+					   << Wi[3] << " "
+					   << (Wi[4] + 0.5*(Wi[5]*Wi[5]+Wi[6]*Wi[6]+Wi[7]*Wi[7])) << " "
+					   << Wi[5] << " "
+					   << Wi[6] << " "
+					   << Wi[7] << " "
+					   << Wi[4] / (Wi[0]*(gamma-1.0)) << " "
+					   << Q[i][i][4] << " "
+					   << cos(M_PI/4)*Wi[1] + cos(M_PI/4)*Wi[2] << " "
+					   << cos(M_PI/4)*Wi[2] - cos(M_PI/4)*Wi[1] << " "
+					   << sqrt(2*xCentroids[i]*xCentroids[i]) << " "
+					   << cos(M_PI/4)*Wi[6] - cos(M_PI/4)*Wi[5] << " "
+					   << std::endl;
+			}
+			break;
+		}
+		// Sod 2D test -- Cynlindrical Explosion
+		case 5 :
+		{
+			for(int i=0;i<nCellsX;i++)
+			{
+				for(int j=0;j<nCellsY;j++)
+				{
+					fvCell Wi = Q[i][j].toPrim(gamma);
+
+					outputFile << xCentroids[i] << " " 
+						   << yCentroids[j] << " "
+						   << Wi[0] << " "
+						   << sqrt(Wi[1]*Wi[1] + Wi[2]*Wi[2]) << " "
+						   << Wi[2] << " "
+						   << Wi[3] << " "
+						   << (Wi[4] + 0.5*(Wi[5]*Wi[5]+Wi[6]*Wi[6]+Wi[7]*Wi[7])) << " "
+						   << Wi[5] << " "
+						   << Wi[6] << " "
+						   << Wi[7] << " "
+						   << Wi[4] / (Wi[0]*(gamma-1.0)) << " "
+						   << Q[i][j][4]
+						   << std::endl;
+				}
+				outputFile << "\n";
+			}
+			break;
+		}
+		// Orszag Tang Vortex
+		case 9 :
+		{
+			for(int i=0;i<nCellsX;i++)
+			{
+				for(int j=0;j<nCellsY;j++)
+				{
+					fvCell Wi = Q[i][j].toPrim(gamma);
+
+					outputFile << xCentroids[i] << " " 
+						   << yCentroids[j] << " "
+						   << Wi[0] << " "
+						   << Wi[1] << " "
+						   << Wi[2] << " "
+						   << Wi[3] << " "
+						   << (Wi[4] + 0.5*(Wi[5]*Wi[5]+Wi[6]*Wi[6]+Wi[7]*Wi[7])) << " "
+						   << Wi[5] << " "
+						   << Wi[6] << " "
+						   << Wi[7] << " "
+						   << Wi[4] / (Wi[0]*(gamma-1.0)) << " "
+						   << Q[i][j][4]
+						   << sqrt(Wi[1]*Wi[1] + Wi[2]*Wi[2]) << " "
+						   << std::endl;
+				}
+				outputFile << "\n";
+			}
+			break;
+		}
+		// Kelvin-Helmholtz Instability
+		case 10 :
+		{
+			for(int i=0;i<nCellsX;i++)
+			{
+				for(int j=0;j<nCellsY;j++)
+				{
+					fvCell Wi = Q[i][j].toPrim(gamma);
+
+					outputFile << xCentroids[i] << " " 
+						   << yCentroids[j] << " "
+						   << Wi[0] << " "
+						   << sqrt(Wi[1]*Wi[1] + Wi[2]*Wi[2]) << " "
+						   << Wi[2] << " "
+						   << Wi[3] << " "
+						   << (Wi[4] + 0.5*(Wi[5]*Wi[5]+Wi[6]*Wi[6]+Wi[7]*Wi[7])) << " "
+						   << Wi[5] << " "
+						   << Wi[6] << " "
+						   << Wi[7] << " "
+						   << Wi[4] / (Wi[0]*(gamma-1.0)) << " "
+						   << Q[i][j][4]
+						   << std::endl;
+				}
+				outputFile << "\n";
+			}
+			break;
+		}
+	}
+
 }
 
 // Calculate flux is used to parse any chosen flux function in based on user

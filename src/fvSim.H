@@ -25,6 +25,8 @@ class fvSim{
 		void output();
 		void computeTimeStep();
 		void fullTimeStepUpdate(bool);
+		void copyDomain();
+		void setBoundaryConditions(bool);
 		std::array<fvCell,2> reconstructData(const fvCell&, const fvCell&, const fvCell&,
 			std::function<std::array<fvCell,2>(const fvCell&,const fvCell&, const fvCell&)>);
 		const fvCell calculateFlux(const fvCell&, const fvCell&, const double&, const double&, const double&, bool, 
@@ -36,6 +38,7 @@ class fvSim{
 		int             nCellsY;
 		int             m_ghost;
 		int             m_test;
+		std::string     m_testName;
 		double          x0;
 		double          x1;
 		double          y0;
